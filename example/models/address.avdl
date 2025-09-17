@@ -1,0 +1,9 @@
+namespace com.example.avro;
+
+schema Address;
+
+record Address {
+    string street;
+    string city;
+    string zipCode;
+}

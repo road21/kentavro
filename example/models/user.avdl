@@ -1,0 +1,13 @@
+namespace com.example.avro;
+
+schema User;
+
+import idl "address.avdl";
+
+record User {
+    string name;
+    int id;
+    string email;
+    int age = 0;
+    com.example.avro.Address address;
+}
