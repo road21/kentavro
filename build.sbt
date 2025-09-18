@@ -6,7 +6,8 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "kentavro-core",
     libraryDependencies ++= List(
-      deps.avro
+      deps.avro,
+      deps.scalaTest
     )
   )
 
@@ -14,33 +15,21 @@ lazy val idl = (project in file("modules/idl"))
   .settings(
     name := "kentavro-idl",
     libraryDependencies ++= List(
-      deps.avroIdl
+      deps.avroIdl,
+      deps.scalaTest
     )
   )
   .dependsOn(core)
 
 lazy val example = (project in file("example"))
+  .enablePlugins(BuildInfoPlugin)
   .settings(
     name := "kentavro-example",
-    Compile / sourceGenerators += Def.task {
-      val outputDir     = (Compile / sourceManaged).value / "kentavro" / "example"
-      val generatedFile = outputDir / "BuildInfo.scala"
-      val rootDir       = baseDirectory.value.toString
-
-      // Ensure the output directory exists
-      IO.createDirectory(outputDir)
-
-      // Write the content to the file
-      val content =
-        s"""package kentavro.example
-          |
-          |object BuildInfo:
-          |  val rootDir: "$rootDir" = "$rootDir"
-          |""".stripMargin
-      IO.write(generatedFile, content)
-
-      Seq(generatedFile)
-    }.taskValue
+    buildInfoOptions += BuildInfoOption.ConstantValue,
+    buildInfoKeys ++= Seq[BuildInfoKey](
+      "rootDir" -> baseDirectory.value.toString
+    ),
+    buildInfoPackage := "kentavro.example"
   )
   .dependsOn(idl)
 
