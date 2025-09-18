@@ -6,7 +6,8 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "kentavro-core",
     libraryDependencies ++= List(
-      deps.avro
+      deps.avro,
+      deps.scalaTest
     )
   )
 
@@ -14,7 +15,8 @@ lazy val idl = (project in file("modules/idl"))
   .settings(
     name := "kentavro-idl",
     libraryDependencies ++= List(
-      deps.avroIdl
+      deps.avroIdl,
+      deps.scalaTest
     )
   )
   .dependsOn(core)
