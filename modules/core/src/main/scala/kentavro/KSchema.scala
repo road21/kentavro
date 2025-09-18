@@ -8,6 +8,7 @@ import org.apache.avro.generic.{GenericData, GenericDatumReader, GenericDatumWri
 import org.apache.avro.io.{DecoderFactory, EncoderFactory}
 
 import scala.util.Try
+import java.nio.ByteBuffer
 
 /**
   * Representation of {@link apache.avro.Schema Schema} that keeps information about types on type-level.
@@ -36,6 +37,20 @@ object KSchema:
   trait Primitive[T] extends KSchema[T]
 
   object Primitive:
+    case class NullSchema(override val schema: Schema)
+      extends Primitive[Null]:
+      override protected def serializeToObject(data: Null): Object = data
+      override protected def deserializeFromObject(
+          obj: Object
+      ): Either[String, Null] =
+        Either.cond(obj == null, null, s"Expected null, got $obj")
+
+    case class BooleanSchema(override val schema: Schema)
+      extends Primitive[Boolean]:
+      override protected def serializeToObject(data: Boolean): Object                    = data: java.lang.Boolean
+      override protected def deserializeFromObject(obj: Object): Either[String, Boolean] =
+        if (obj.isInstanceOf[java.lang.Boolean]) Right(obj.asInstanceOf[java.lang.Boolean])
+        else Left(s"Expected boolean, got ${obj.getClass()}")
     case class IntSchema(override val schema: Schema) extends Primitive[Int]:
       override protected def serializeToObject(data: Int): Object = data: Integer
 
@@ -44,6 +59,40 @@ object KSchema:
       ): Either[String, Int] =
         if (obj.isInstanceOf[Int]) Right(obj.asInstanceOf[Int])
         else Left(s"Expected int, got ${obj.getClass()}")
+
+    case class LongSchema(override val schema: Schema)
+      extends Primitive[Long]:
+      override protected def serializeToObject(data: Long): Object                    = data: java.lang.Long
+      override protected def deserializeFromObject(obj: Object): Either[String, Long] =
+        if (obj.isInstanceOf[java.lang.Long]) Right(obj.asInstanceOf[java.lang.Long])
+        else Left(s"Expected long, got ${obj.getClass()}")
+
+    case class FloatSchema(override val schema: Schema)
+      extends Primitive[Float]:
+      override protected def serializeToObject(data: Float): Object                    = data: java.lang.Float
+      override protected def deserializeFromObject(obj: Object): Either[String, Float] =
+        if (obj.isInstanceOf[java.lang.Float]) Right(obj.asInstanceOf[java.lang.Float])
+        else Left(s"Expected float, got ${obj.getClass()}")
+
+    case class DoubleSchema(override val schema: Schema)
+      extends Primitive[Double]:
+      override protected def serializeToObject(data: Double): Object = data: java.lang.Double
+      override protected def deserializeFromObject(
+          obj: Object
+      ): Either[String, Double] =
+        if (obj.isInstanceOf[java.lang.Double]) Right(obj.asInstanceOf[java.lang.Double])
+        else Left(s"Expected double, got ${obj.getClass()}")
+
+    case class ArrayByteSchema(override val schema: Schema)
+      extends Primitive[Array[Byte]]:
+      override protected def serializeToObject(data: Array[Byte]): Object =
+        ByteBuffer.wrap(data)
+      override protected def deserializeFromObject(
+          obj: Object
+      ): Either[String, Array[Byte]] =
+        if (obj.isInstanceOf[ByteBuffer])
+          Right(obj.asInstanceOf[ByteBuffer].array())
+        else Left(s"Expected Array[Byte], got ${obj.getClass()}")
 
     case class StringSchema(override val schema: Schema)
       extends Primitive[String]:
@@ -80,7 +129,7 @@ object KSchema:
         obj: Object
     ): Either[String, T] =
       if (obj.isInstanceOf[GenericRecord])
-        val g = obj.asInstanceOf[GenericRecord]
+        val g            = obj.asInstanceOf[GenericRecord]
         val (errs, succ) = fields.partitionMap(f =>
           f.schema.deserializeFromObject(g.get(f.name))
         )
