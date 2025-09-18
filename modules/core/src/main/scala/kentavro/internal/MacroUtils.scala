@@ -6,6 +6,7 @@ import org.apache.avro.Schema
 import org.apache.avro.Schema.Field
 import java.util.List as JavaList
 import scala.jdk.CollectionConverters.*
+import scala.reflect.ClassTag
 import kentavro.KSchema
 
 private[kentavro] object MacroUtils:
@@ -13,11 +14,10 @@ private[kentavro] object MacroUtils:
     * Helper class to build KSchema.Record inside macro
     */
   case class RecordBuilder[T <: AnyNamedTuple](
-      fields: List[KSchema.Field[?, ?]],
-      default: Option[T]
+      fields: List[KSchema.Field[?, ?]]
   ):
     def build(schema: Schema): KSchema[T] =
-      KSchema.Record[T](fields, default, schema)
+      KSchema.Record[T](fields, schema)
 
   /**
     * Parse list of avro fields into Expr[RecordBuilder[?]]
@@ -54,7 +54,6 @@ private[kentavro] object MacroUtils:
               ('{
                 RecordBuilder[NamedTuple[hname *: names, htype *: types]](
                   KSchema.Field[hname, htype](${ l }, ${ hinst.asInstanceOf[Expr[KSchema[htype]]] }) :: $tinst.fields,
-                  None // TODO: support default values
                 )
               })
             )
@@ -64,7 +63,7 @@ private[kentavro] object MacroUtils:
         (
           TypeRepr.of[EmptyTuple],
           TypeRepr.of[EmptyTuple],
-          '{ RecordBuilder[NamedTuple.Empty](Nil, None) }
+          '{ RecordBuilder[NamedTuple.Empty](Nil) }
         )
 
   /**
@@ -79,14 +78,6 @@ private[kentavro] object MacroUtils:
     import quotes.reflect.*
 
     schema.getType() match
-      case Schema.Type.RECORD =>
-        val fields                       = schema.getFields().asScala.toList
-        val (namesRepr, typesRepr, inst) = parseFields(fields)
-        (namesRepr.asType, typesRepr.asType) match
-          case ('[type names <: Tuple; names], '[type types <: Tuple; types]) =>
-            (TypeRepr.of[NamedTuple[names, types]], '{ ${ inst }.build(${ Expr(schema) }) })
-          case _ =>
-            quotes.reflect.report.errorAndAbort("unexpected error")
       case Schema.Type.NULL =>
         (TypeRepr.of[Null], '{ KSchema.Primitive.NullSchema(${ Expr(schema) }) })
       case Schema.Type.BOOLEAN =>
@@ -103,6 +94,31 @@ private[kentavro] object MacroUtils:
         (TypeRepr.of[Array[Byte]], '{ KSchema.Primitive.ArrayByteSchema(${ Expr(schema) }) })
       case Schema.Type.STRING =>
         (TypeRepr.of[String], '{ KSchema.Primitive.StringSchema(${ Expr(schema) }) })
+      case Schema.Type.RECORD =>
+        val fields                       = schema.getFields().asScala.toList
+        val (namesRepr, typesRepr, inst) = parseFields(fields)
+        (namesRepr.asType, typesRepr.asType) match
+          case ('[type names <: Tuple; names], '[type types <: Tuple; types]) =>
+            (TypeRepr.of[NamedTuple[names, types]], '{ ${ inst }.build(${ Expr(schema) }) })
+          case _ =>
+            quotes.reflect.report.errorAndAbort("unexpected error")
+      case Schema.Type.ARRAY =>
+        val elemSchema  = schema.getElementType()
+        val (repr, sch) = parseSchema(elemSchema)
+        repr.asType match
+          case '[t] =>
+            val ct = Expr.summon[ClassTag[t]]
+            ct match
+              case Some(ctInst) =>
+                (
+                  TypeRepr.of[Vector[t]],
+                  '{ KSchema.ArraySchema[t](${ Expr(schema) }, ${ sch }.asInstanceOf[KSchema[t]])(using $ctInst) }
+                )
+              case None =>
+                quotes.reflect.report.errorAndAbort(
+                  s"no class tag found for ${repr.show}"
+                )
+
       case _ =>
         quotes.reflect.report.errorAndAbort(
           "not implemented yet" // TODO: support all avro types
@@ -141,6 +157,8 @@ private[kentavro] object MacroUtils:
           '{ Schema.create(Schema.Type.BYTES) }
         case Schema.Type.STRING =>
           '{ Schema.create(Schema.Type.STRING) }
+        case Schema.Type.ARRAY =>
+          '{ Schema.createArray(${ Expr(x.getElementType()) }) }
         case Schema.Type.RECORD =>
           val name = Option(x.getName()).map(Expr.apply).getOrElse('{ null })
           val doc  = Option(x.getDoc()).map(Expr.apply).getOrElse('{ null })

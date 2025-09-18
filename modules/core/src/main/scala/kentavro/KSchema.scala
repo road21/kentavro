@@ -9,6 +9,8 @@ import org.apache.avro.io.{DecoderFactory, EncoderFactory}
 
 import scala.util.Try
 import java.nio.ByteBuffer
+import scala.reflect.ClassTag
+import scala.jdk.CollectionConverters.*
 
 /**
   * Representation of {@link apache.avro.Schema Schema} that keeps information about types on type-level.
@@ -106,12 +108,12 @@ object KSchema:
 
   case class Field[Name <: String & Singleton, T](
       name: Name,
-      schema: KSchema[T]
+      schema: KSchema[T],
+      default: Option[T] = None
   )
 
   case class Record[T <: AnyNamedTuple](
       fields: List[Field[?, ?]],
-      default: Option[T],
       schema: Schema
   ) extends KSchema[T]:
     override protected def serializeToObject(data: T): Object =
@@ -139,6 +141,21 @@ object KSchema:
           errs.mkString(",")
         )
       else Left(s"Expected record, got: ${obj.getClass()}")
+
+  case class ArraySchema[T: ClassTag](
+      override val schema: Schema,
+      element: KSchema[T]
+  ) extends KSchema[Vector[T]]:
+    override protected def serializeToObject(data: Vector[T]): Object =
+      data.map(element.serializeToObject).asJavaCollection
+
+    override protected def deserializeFromObject(obj: Object): Either[String, Vector[T]] =
+      if (obj.isInstanceOf[java.util.Collection[?]])
+        val arr           = obj.asInstanceOf[java.util.Collection[Object]].asScala.toVector
+        val (errs, succs) = arr.partitionMap(element.deserializeFromObject)
+        if (errs.nonEmpty) Left(errs.mkString(", "))
+        else Right(succs)
+      else Left(s"Expected array, got: ${obj.getClass()}")
 
   private def serializeUnsafe(obj: Object, schema: Schema): Array[Byte] = {
     val writer  = new GenericDatumWriter[Object](schema)
