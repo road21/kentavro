@@ -136,7 +136,7 @@ class AvscTest extends AnyFlatSpec with Matchers:
       case r: KSchema.Record[?] =>
         r.fields should have size 5
         r.fields.collectFirst {
-          case KSchema.Field("address", KSchema.Record(fields, _, _)) => fields
+          case KSchema.Field("address", KSchema.Record(fields, _), _) => fields
         }.fold(
           fail("Expected record schema")
         ) {
@@ -232,3 +232,41 @@ class AvscTest extends AnyFlatSpec with Matchers:
         fieldBytes.sameElements(test.fieldBytes) should be(true)
       case _ =>
         fail("Expected successfull deserialization")
+
+  it should "follow round-trip for array schemas" in:
+    val stringArr: KSchema[Vector[String]] =
+      Avsc.fromString(
+        """|{
+           |  "items": "string",
+           |  "type": "array"
+           |}
+           |""".stripMarginCT
+      )
+
+    val arr = Vector("foo", "bar", "buzz")
+    stringArr.deserialize(stringArr.serialize(arr)) should be(Right(arr))
+
+    val usrsSch: KSchema[Vector[(id: Int, name: String)]] =
+      Avsc.fromString(
+        """|{
+           |  "type": "array",
+           |  "items": {
+           |    "type": "record",
+           |    "name": "LineItem",
+           |      "fields": [
+           |        {
+           |          "name": "id",
+           |          "type": "int"
+           |        },
+           |        {
+           |          "name": "name",
+           |          "type": "string"
+           |        }
+           |    ]
+           |  }
+           |}
+           |""".stripMarginCT
+      )
+
+    val usrs = Vector[(id: Int, name: String)](1 -> "Bob", 2 -> "John", 3 -> "Cash")
+    usrsSch.deserialize(usrsSch.serialize(usrs)) should be(Right(usrs))

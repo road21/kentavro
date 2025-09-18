@@ -67,7 +67,7 @@ class AvdlTest extends AnyFlatSpec with Matchers:
       case r: KSchema.Record[?] =>
         r.fields should have size 5
         r.fields.collectFirst {
-          case KSchema.Field("address", KSchema.Record(fields, _, _)) => fields
+          case KSchema.Field("address", KSchema.Record(fields, _), _) => fields
         }.fold(
           fail("Expected record schema")
         ) {
