@@ -119,7 +119,7 @@ private[kentavro] object AvdlImpl:
           "expected string literals arguments"
         )
 
-  def fromFileOut[Dir <: Singleton & String: Type](fileName: Expr[String], directory: Expr[String])(using
+  def fromFileOut[Dir <: Singleton & String: Type](fileName: Expr[String])(using
       Quotes
   ): Expr[KSchema[?]] =
     (fileName.value, Type.valueOfConstant[Dir]) match
