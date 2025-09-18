@@ -11,6 +11,8 @@ import scala.util.Try
 import java.nio.ByteBuffer
 import scala.reflect.ClassTag
 import scala.jdk.CollectionConverters.*
+import scala.collection.immutable.ListSet
+import org.apache.avro.generic.GenericData.EnumSymbol
 
 /**
   * Representation of {@link apache.avro.Schema Schema} that keeps information about types on type-level.
@@ -98,7 +100,8 @@ object KSchema:
 
     case class StringSchema(override val schema: Schema)
       extends Primitive[String]:
-      override protected def serializeToObject(data: String): Object = data
+      override protected def serializeToObject(data: String): Object =
+        org.apache.avro.util.Utf8(data)
       override protected def deserializeFromObject(
           obj: Object
       ): Either[String, String] =
@@ -156,6 +159,19 @@ object KSchema:
         if (errs.nonEmpty) Left(errs.mkString(", "))
         else Right(succs)
       else Left(s"Expected array, got: ${obj.getClass()}")
+
+  case class EnumSchema[T <: String](
+      override val schema: Schema,
+      symbols: ListSet[String]
+  ) extends KSchema[T]:
+    override protected def serializeToObject(data: T): Object =
+      EnumSymbol(schema, data)
+
+    override protected def deserializeFromObject(obj: Object): Either[String, T] =
+      if (obj.isInstanceOf[EnumSymbol])
+        val str = obj.asInstanceOf[EnumSymbol].toString
+        Right(str.asInstanceOf[T])
+      else Left(s"Expected symbol (string), got ${obj.getClass()}")
 
   private def serializeUnsafe(obj: Object, schema: Schema): Array[Byte] = {
     val writer  = new GenericDatumWriter[Object](schema)

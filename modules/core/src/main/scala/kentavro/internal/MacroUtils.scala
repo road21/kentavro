@@ -8,6 +8,7 @@ import java.util.List as JavaList
 import scala.jdk.CollectionConverters.*
 import scala.reflect.ClassTag
 import kentavro.KSchema
+import scala.collection.immutable.ListSet
 
 private[kentavro] object MacroUtils:
   /**
@@ -74,7 +75,7 @@ private[kentavro] object MacroUtils:
     *   Expr[KSchema[?]]
     * )
     */
-  def parseSchema(schema: Schema)(using quotes: Quotes): (quotes.reflect.TypeRepr, Expr[KSchema[?]]) = {
+  def parseSchema(schema: Schema)(using quotes: Quotes): (quotes.reflect.TypeRepr, Expr[KSchema[?]]) =
     import quotes.reflect.*
 
     schema.getType() match
@@ -118,12 +119,36 @@ private[kentavro] object MacroUtils:
                 quotes.reflect.report.errorAndAbort(
                   s"no class tag found for ${repr.show}"
                 )
+      case Schema.Type.ENUM =>
+        val symbols = schema.getEnumSymbols().asScala.toList
+        symbols match
+          case h :: t =>
+            val typ = makeUnionTypeOfLiterals(h, t)
+            typ.asType match
+              case '[type typ <: String; typ] =>
+                (typ, '{ KSchema.EnumSchema[typ](${ Expr(schema) }, ListSet.from(${ Expr(symbols) })) })
+              case _ => quotes.reflect.report.errorAndAbort("unexpected error")
+          case _ =>
+            quotes.reflect.report.errorAndAbort("enums should contain at least one symbol")
 
       case _ =>
         quotes.reflect.report.errorAndAbort(
           "not implemented yet" // TODO: support all avro types
         )
-  }
+
+  def makeUnionTypeOfLiterals(head: String, tail: List[String])(using Quotes): quotes.reflect.TypeRepr =
+    import quotes.reflect.*
+
+    val repr = Expr(head) match
+      case '{ type h <: String & scala.Singleton; $h: h } =>
+        TypeRepr.of[h]
+      case _ =>
+        quotes.reflect.report.errorAndAbort("unexpected error")
+
+    tail match
+      case htail :: ttail =>
+        OrType(repr, makeUnionTypeOfLiterals(htail, ttail))
+      case Nil => repr
 
   given [A: ToExpr: Type] => ToExpr[JavaList[A]]:
     def apply(x: JavaList[A])(using Quotes): Expr[JavaList[A]] =
@@ -159,6 +184,14 @@ private[kentavro] object MacroUtils:
           '{ Schema.create(Schema.Type.STRING) }
         case Schema.Type.ARRAY =>
           '{ Schema.createArray(${ Expr(x.getElementType()) }) }
+        case Schema.Type.ENUM =>
+          val name    = Option(x.getName()).map(Expr.apply).getOrElse('{ null })
+          val doc     = Option(x.getDoc()).map(Expr.apply).getOrElse('{ null })
+          val ns      = Option(x.getNamespace()).map(Expr.apply).getOrElse('{ null })
+          val symbols = Expr(x.getEnumSymbols())
+          val default = Option(x.getEnumDefault()).map(Expr.apply).getOrElse('{ null })
+
+          '{ Schema.createEnum($name, $doc, $ns, $symbols, $default) }
         case Schema.Type.RECORD =>
           val name = Option(x.getName()).map(Expr.apply).getOrElse('{ null })
           val doc  = Option(x.getDoc()).map(Expr.apply).getOrElse('{ null })

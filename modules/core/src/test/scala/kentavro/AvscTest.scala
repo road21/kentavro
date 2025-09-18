@@ -151,7 +151,7 @@ class AvscTest extends AnyFlatSpec with Matchers:
       case _ =>
         fail("Expected record schema")
 
-  it should "follow round-trip serialization for primitive fields" in:
+  it should "respect round-trip serialization for primitive fields" in:
     type Primitives = (
         fieldNull: Null,
         fieldBoolean: Boolean,
@@ -233,7 +233,7 @@ class AvscTest extends AnyFlatSpec with Matchers:
       case _ =>
         fail("Expected successfull deserialization")
 
-  it should "follow round-trip for array schemas" in:
+  it should "respect round-trip for array schemas" in:
     val stringArr: KSchema[Vector[String]] =
       Avsc.fromString(
         """|{
@@ -270,3 +270,24 @@ class AvscTest extends AnyFlatSpec with Matchers:
 
     val usrs = Vector[(id: Int, name: String)](1 -> "Bob", 2 -> "John", 3 -> "Cash")
     usrsSch.deserialize(usrsSch.serialize(usrs)) should be(Right(usrs))
+
+  it should "respect round-trip for enums" in:
+    val tlSchema: KSchema["RED" | "YELLOW" | "GREEN"] =
+      Avsc.fromString(
+        """|{
+           |  "type": "enum",
+           |  "name": "TrafficLight",
+           |  "namespace": "com.example.enums",
+           |  "symbols": ["RED", "YELLOW", "GREEN"],
+           |  "doc": "Represents the states of a traffic light."
+           |}
+           |""".stripMarginCT
+      )
+
+    val red: "RED"       = valueOf
+    val yellow: "YELLOW" = valueOf
+    val green: "GREEN"   = valueOf
+
+    tlSchema.deserialize(tlSchema.serialize(red)) should be(Right(red))
+    tlSchema.deserialize(tlSchema.serialize(yellow)) should be(Right(yellow))
+    tlSchema.deserialize(tlSchema.serialize(green)) should be(Right(green))
