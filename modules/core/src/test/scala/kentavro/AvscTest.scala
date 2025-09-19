@@ -291,3 +291,45 @@ class AvscTest extends AnyFlatSpec with Matchers:
     tlSchema.deserialize(tlSchema.serialize(red)) should be(Right(red))
     tlSchema.deserialize(tlSchema.serialize(yellow)) should be(Right(yellow))
     tlSchema.deserialize(tlSchema.serialize(green)) should be(Right(green))
+
+  it should "respect round-trip for map schemas" in:
+    val intMap: KSchema[Map[String, Int]] =
+      Avsc.fromString(
+        """|{
+           |  "type": "map",
+           |  "values": "int"
+           |}
+           |""".stripMarginCT
+      )
+
+    val map = Map("foo" -> 1, "bar" -> 2, "buzz" -> 3)
+    intMap.deserialize(intMap.serialize(map)) should be(Right(map))
+
+    val usrsSch: KSchema[Map[String, (id: Int, name: String)]] =
+      Avsc.fromString(
+        """|{
+           |  "type": "map",
+           |  "values": {
+           |    "type": "record",
+           |    "name": "LineItem",
+           |      "fields": [
+           |        {
+           |          "name": "id",
+           |          "type": "int"
+           |        },
+           |        {
+           |          "name": "name",
+           |          "type": "string"
+           |        }
+           |    ]
+           |  }
+           |}
+           |""".stripMarginCT
+      )
+
+    val usrs = Map[String, (id: Int, name: String)](
+      "bob"  -> (1, "Bob"),
+      "john" -> (2, "John"),
+      "cash" -> (3, "Cash")
+    )
+    usrsSch.deserialize(usrsSch.serialize(usrs)) should be(Right(usrs))

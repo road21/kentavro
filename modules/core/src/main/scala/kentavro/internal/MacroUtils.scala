@@ -130,7 +130,15 @@ private[kentavro] object MacroUtils:
               case _ => quotes.reflect.report.errorAndAbort("unexpected error")
           case _ =>
             quotes.reflect.report.errorAndAbort("enums should contain at least one symbol")
-
+      case Schema.Type.MAP =>
+        val valueSchema = schema.getValueType()
+        val (typ, inst) = parseSchema(valueSchema)
+        typ.asType match
+          case '[t] =>
+            (
+              TypeRepr.of[Map[String, t]],
+              '{ KSchema.MapSchema[t](${ Expr(schema) }, ${ inst }.asInstanceOf[KSchema[t]]) }
+            )
       case _ =>
         quotes.reflect.report.errorAndAbort(
           "not implemented yet" // TODO: support all avro types
@@ -185,15 +193,18 @@ private[kentavro] object MacroUtils:
         case Schema.Type.ARRAY =>
           '{ Schema.createArray(${ Expr(x.getElementType()) }) }
         case Schema.Type.ENUM =>
-          val name    = Option(x.getName()).map(Expr.apply).getOrElse('{ null })
+          val name    = Expr(x.getName())
           val doc     = Option(x.getDoc()).map(Expr.apply).getOrElse('{ null })
           val ns      = Option(x.getNamespace()).map(Expr.apply).getOrElse('{ null })
           val symbols = Expr(x.getEnumSymbols())
           val default = Option(x.getEnumDefault()).map(Expr.apply).getOrElse('{ null })
 
           '{ Schema.createEnum($name, $doc, $ns, $symbols, $default) }
+        case Schema.Type.MAP =>
+          val valueSchema = x.getValueType()
+          '{ Schema.createMap(${ Expr(valueSchema) }) }
         case Schema.Type.RECORD =>
-          val name = Option(x.getName()).map(Expr.apply).getOrElse('{ null })
+          val name = Expr(x.getName())
           val doc  = Option(x.getDoc()).map(Expr.apply).getOrElse('{ null })
           val ns   = Option(x.getNamespace()).map(Expr.apply).getOrElse('{ null })
 
