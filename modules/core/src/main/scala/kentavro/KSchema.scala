@@ -13,6 +13,10 @@ import scala.reflect.ClassTag
 import scala.jdk.CollectionConverters.*
 import scala.collection.immutable.ListSet
 import org.apache.avro.generic.GenericData.EnumSymbol
+import kentavro.data.Fixed
+import org.apache.avro.generic.GenericFixed
+import org.apache.avro.specific.{SpecificData, SpecificDatumReader, SpecificDatumWriter, SpecificFixed}
+import org.apache.avro.io.{DatumReader, DatumWriter}
 
 /**
   * Representation of {@link apache.avro.Schema Schema} that keeps information about types on type-level.
@@ -195,10 +199,38 @@ object KSchema:
       EnumSymbol(schema, data)
 
     override protected def deserializeFromObject(obj: AnyRef): Either[String, T] =
-      if (obj.isInstanceOf[EnumSymbol])
-        val str = obj.asInstanceOf[EnumSymbol].toString
-        Right(str.asInstanceOf[T])
-      else Left(s"Expected symbol (string), got ${obj.getClass()}")
+      obj match
+        case e: EnumSymbol =>
+          val str = e.toString
+          Right(str.asInstanceOf[T])
+        case _ => Left(s"Expected symbol (string), got ${obj.getClass()}")
+
+  case class FixedSchema[T <: Int & Singleton](
+      override val schema: Schema,
+      size: Int
+  )(using ValueOf[T]) extends KSchema[Fixed[T]]:
+    override protected def serializeToObject(data: Fixed[T]): AnyRef =
+      new SpecificFixed:
+        self =>
+        override val bytes: Array[Byte]                  = data.bytes
+        override def getSchema(): org.apache.avro.Schema = schema
+
+        val writer: DatumWriter[AnyRef]                             = new SpecificDatumWriter[AnyRef](schema)
+        override def writeExternal(out: java.io.ObjectOutput): Unit =
+          writer.write(self, SpecificData.getEncoder(out))
+
+        val reader: DatumReader[AnyRef]                 = new SpecificDatumReader[AnyRef](schema)
+        def readExternal(in: java.io.ObjectInput): Unit =
+          reader.read(self, SpecificData.getDecoder(in))
+
+    override protected def deserializeFromObject(
+        obj: AnyRef
+    ): Either[String, Fixed[T]] =
+      obj match
+        case b: GenericFixed =>
+          val arr = b.bytes()
+          Fixed.from[T](arr).toRight(s"Expected array of bytes with size $size, got: size ${arr.length}")
+        case _ => Left(s"Expected Array[Byte] (ByteBuffer), got ${obj.getClass()}")
 
   private def serializeUnsafe(obj: Object, schema: Schema): Array[Byte] = {
     val writer  = new GenericDatumWriter[Object](schema)

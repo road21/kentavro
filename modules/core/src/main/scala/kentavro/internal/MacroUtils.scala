@@ -9,6 +9,7 @@ import scala.jdk.CollectionConverters.*
 import scala.reflect.ClassTag
 import kentavro.KSchema
 import scala.collection.immutable.ListSet
+import kentavro.data.Fixed
 
 private[kentavro] object MacroUtils:
   /**
@@ -139,6 +140,20 @@ private[kentavro] object MacroUtils:
               TypeRepr.of[Map[String, t]],
               '{ KSchema.MapSchema[t](${ Expr(schema) }, ${ inst }.asInstanceOf[KSchema[t]]) }
             )
+      case Schema.Type.FIXED =>
+        val size = schema.getFixedSize()
+        Expr(size) match
+          case '{ type s <: Int & scala.Singleton; $s: s } =>
+            Expr.summon[ValueOf[s]] match
+              case Some(valueOf) =>
+                (
+                  TypeRepr.of[Fixed[s]],
+                  '{ KSchema.FixedSchema[s](${ Expr(schema) }, ${ Expr(size) })(using ${ valueOf }) }
+                )
+              case None =>
+                quotes.reflect.report.errorAndAbort("unexpected error")
+          case _ =>
+            quotes.reflect.report.errorAndAbort("unexpected error")
       case _ =>
         quotes.reflect.report.errorAndAbort(
           "not implemented yet" // TODO: support all avro types
@@ -192,6 +207,13 @@ private[kentavro] object MacroUtils:
           '{ Schema.create(Schema.Type.STRING) }
         case Schema.Type.ARRAY =>
           '{ Schema.createArray(${ Expr(x.getElementType()) }) }
+        case Schema.Type.FIXED =>
+          val name = Expr(x.getName())
+          val ns   = Option(x.getNamespace()).map(Expr.apply).getOrElse('{ null })
+          val doc  = Option(x.getDoc()).map(Expr.apply).getOrElse('{ null })
+          val size = Expr(x.getFixedSize())
+
+          '{ Schema.createFixed($name, $doc, $ns, $size) }
         case Schema.Type.ENUM =>
           val name    = Expr(x.getName())
           val doc     = Option(x.getDoc()).map(Expr.apply).getOrElse('{ null })
@@ -217,7 +239,7 @@ private[kentavro] object MacroUtils:
               ${ Expr(x.getFields()) }
             )
           }
-        case typ => // TODO: support all avro types
+        case Schema.Type.UNION => // TODO: support all avro types
           quotes.reflect.report.errorAndAbort(
-            s"type ${typ} is not supported yet"
+            s"type union is not supported yet"
           )
