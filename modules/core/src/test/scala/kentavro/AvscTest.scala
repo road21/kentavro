@@ -5,6 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import org.apache.avro.Schema
 import org.apache.avro.Schema.Type
 import kentavro.Utils.stripMarginCT
+import kentavro.data.Fixed
 import NamedTuple.withNames
 
 class AvscTest extends AnyFlatSpec with Matchers:
@@ -333,3 +334,19 @@ class AvscTest extends AnyFlatSpec with Matchers:
       "cash" -> (3, "Cash")
     )
     usrsSch.deserialize(usrsSch.serialize(usrs)) should be(Right(usrs))
+
+  it should "respect round-trip for fixed schemas" in:
+    val fixed5: KSchema[Fixed[5]] =
+      Avsc.fromString(
+        """|{
+           |  "type": "fixed",
+           |  "name": "kek",
+           |  "size": 5
+           |}
+           |""".stripMarginCT
+      )
+
+    val arr = Array[Byte](42, 43, 44, 45, 46)
+    fixed5.deserialize(
+      fixed5.serialize(Fixed.from[5](arr).get)
+    ).map(_.bytes.sameElements(arr)) should be(Right(true))
