@@ -350,3 +350,25 @@ class AvscTest extends AnyFlatSpec with Matchers:
     fixed5.deserialize(
       fixed5.serialize(Fixed.from[5](arr).get)
     ).map(_.bytes.sameElements(arr)) should be(Right(true))
+
+  it should "respect round-trip for unions" in:
+    val schema: KSchema[(field: Int | Boolean)] =
+      Avsc.fromString(
+        """|{
+           |  "type": "record",
+           |  "name": "MyRecord",
+           |  "fields": [
+           |    {
+           |      "name": "field",
+           |      "type": ["int", "boolean"]
+           |    }
+           |  ]
+           |}
+           |""".stripMarginCT
+      )
+
+    val bv = true
+    schema.deserialize(schema.serialize((field = bv))) should be(Right((field = bv)))
+
+    val iv = 42
+    schema.deserialize(schema.serialize((field = iv))) should be(Right((field = iv)))

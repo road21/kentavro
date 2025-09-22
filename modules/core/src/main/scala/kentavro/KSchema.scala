@@ -17,6 +17,8 @@ import kentavro.data.Fixed
 import org.apache.avro.generic.GenericFixed
 import org.apache.avro.specific.{SpecificData, SpecificDatumReader, SpecificDatumWriter, SpecificFixed}
 import org.apache.avro.io.{DatumReader, DatumWriter}
+import scala.compiletime.summonInline
+import scala.annotation.nowarn
 
 /**
   * Representation of {@link apache.avro.Schema Schema} that keeps information about types on type-level.
@@ -31,8 +33,11 @@ trait KSchema[T]:
   type Type = T
 
   type JType <: AnyRef
-  def isJType(value: Any): Option[JType]
+  def isJType(value: AnyRef): Option[JType]
   def JTypeClassName: String
+
+  def isType(value: Any): Option[T]
+  def TypeClassName: String
 
   def schema: Schema
 
@@ -51,12 +56,22 @@ trait KSchema[T]:
   def deserializeFromJType(obj: JType): Either[String, T]
 
 object KSchema:
-  trait WithJClassTag[T, _JType <: AnyRef](using classTag: ClassTag[_JType]) extends KSchema[T]:
+  type Aux[Type, _JType] = KSchema[Type] { type JType = _JType }
+
+  trait WithJClassTag[T, _JType <: AnyRef](
+      using
+      jClassTag: ClassTag[_JType],
+      classTag: ClassTag[T]
+  ) extends KSchema[T]:
     override type JType = _JType
 
-    override val JTypeClassName: String = classTag.runtimeClass.toString()
+    override val JTypeClassName: String = jClassTag.runtimeClass.toString()
+    override val TypeClassName: String  = classTag.runtimeClass.toString()
 
-    override def isJType(value: Any): Option[JType] =
+    override def isJType(value: AnyRef): Option[JType] =
+      jClassTag.unapply(value)
+
+    override def isType(value: Any): Option[T] =
       classTag.unapply(value)
 
   trait Primitive[T] extends KSchema[T]
@@ -68,9 +83,13 @@ object KSchema:
       extends Primitive[Null]:
       override type JType = Null
 
-      override def isJType(value: Any): Option[Null] =
+      override def isJType(value: AnyRef): Option[Null] =
+        Option.when(value == null)(null)
+
+      override def isType(value: Any): Option[Null] =
         Option.when(value == null)(null)
       override val JTypeClassName: String = "Null"
+      override val TypeClassName: String  = "Null"
 
       override def serializeToJType(data: Null): Null                    = data
       override def deserializeFromJType(obj: Null): Either[String, Null] = Right(null)
@@ -114,7 +133,7 @@ object KSchema:
   case class Record[T <: AnyNamedTuple](
       fields: List[Field[?, ?]],
       schema: Schema
-  ) extends WithJClassTag[T, GenericRecord]:
+  )(using ClassTag[T]) extends WithJClassTag[T, GenericRecord]:
     override def serializeToJType(data: T): JType =
       val record = new GenericData.Record(schema)
       val values = NamedTuple.toList(data.asInstanceOf)
@@ -181,13 +200,17 @@ object KSchema:
   case class EnumSchema[T <: String](
       override val schema: Schema,
       symbols: ListSet[String]
-  ) extends WithJClassTag[T, EnumSymbol]:
+  )(using ClassTag[T]) extends WithJClassTag[T, EnumSymbol]:
     override def serializeToJType(data: T): EnumSymbol =
       EnumSymbol(schema, data)
 
     override def deserializeFromJType(obj: EnumSymbol): Either[String, T] =
       val str = obj.toString
       Right(str.asInstanceOf[T])
+
+  object EnumSchema:
+    inline def make[T <: String](schema: Schema, symbols: ListSet[String]): EnumSchema[T] =
+      EnumSchema[T](schema, symbols)(using summonInline[ClassTag[T]])
 
   case class FixedSchema[T <: Int & Singleton](
       override val schema: Schema,
@@ -213,7 +236,35 @@ object KSchema:
       val arr = obj.bytes()
       Fixed.from[T](arr).toRight(s"Expected array of bytes with size $size, got: size ${arr.length}")
 
-  private def serializeUnsafe(obj: Object, schema: Schema): Array[Byte] = {
+  case class UnionSchema[T](
+      override val schema: Schema,
+      variants: List[KSchema[?]]
+  ) extends KSchema[T]:
+    override type JType = AnyRef
+
+    override val JTypeClassName: String = variants.map(_.JTypeClassName).mkString("|")
+    override def TypeClassName: String  = variants.map(_.TypeClassName).mkString("|")
+
+    override def isJType(value: AnyRef): Option[JType] =
+      variants.view.map(_.isJType(value)).collectFirst { case Some(v) => v }
+
+    override def isType(value: Any): Option[T] =
+      variants.view.map(_.isType(value)).collectFirst { case Some(v) => v.asInstanceOf[T] }
+
+    @nowarn
+    override def serializeToJType(data: T): JType =
+      variants.view.map(s => s.isType(data).map(s -> _)).collectFirst {
+        case Some((s: KSchema[T], v: T)) =>
+          s.serializeToJType(v)
+      }.getOrElse(throw new Exception("shouldn't be thrown"))
+
+    @nowarn
+    override def deserializeFromJType(obj: AnyRef): Either[String, T] =
+      variants.view.map(s => s.isJType(obj).map(s -> _)).collectFirst {
+        case Some((s: KSchema.Aux[?, T], v: T)) => s.deserializeFromJType(v).asInstanceOf[Either[String, T]]
+      }.toRight(s"Unable to deserialize $obj, deserializer not found").flatten
+
+  private def serializeUnsafe(obj: AnyRef, schema: Schema): Array[Byte] = {
     val writer  = new GenericDatumWriter[Object](schema)
     val out     = new ByteArrayOutputStream()
     val encoder = EncoderFactory.get().binaryEncoder(out, null)
