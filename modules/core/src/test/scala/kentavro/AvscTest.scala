@@ -5,7 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import org.apache.avro.Schema
 import org.apache.avro.Schema.Type
 import kentavro.Utils.stripMarginCT
-import kentavro.data.Fixed
+import kentavro.BytesN
 import NamedTuple.withNames
 
 class AvscTest extends AnyFlatSpec with Matchers:
@@ -35,7 +35,7 @@ class AvscTest extends AnyFlatSpec with Matchers:
     stringSch.schema should be(Schema.create(Type.STRING))
 
   it should "be able to parse record schemas" in:
-    val recordSch: KSchema[(id: Int, name: String, email: String, age: Int)] =
+    val recordSch: KSchema["example.avro.User" ~ (id: Int, name: String, email: String, age: Int)] =
       Avsc.fromString(
         """|{
            |  "namespace": "example.avro",
@@ -64,7 +64,7 @@ class AvscTest extends AnyFlatSpec with Matchers:
       )
 
     recordSch match
-      case r: KSchema.Record[?] =>
+      case r: KSchema.RecordSchema[?, ?] =>
         r.fields should have size 4
         r.fields.map(f => (f.name, f.schema.schema)) should be(
           List(
@@ -78,12 +78,12 @@ class AvscTest extends AnyFlatSpec with Matchers:
         fail("Expected record schema")
 
   it should "be able to parse nested record schemas" in:
-    val recordSch: KSchema[(
+    val recordSch: KSchema["example.avro.User" ~ (
         id: Int,
         name: String,
         email: String,
         age: Int,
-        address: (country: String, city: String, street: String)
+        address: "example.avro.Address" ~ (country: String, city: String, street: String)
     )] =
       Avsc.fromString(
         """|{
@@ -134,10 +134,10 @@ class AvscTest extends AnyFlatSpec with Matchers:
       )
 
     recordSch match
-      case r: KSchema.Record[?] =>
+      case r: KSchema.RecordSchema[?, ?] =>
         r.fields should have size 5
         r.fields.collectFirst {
-          case KSchema.Field("address", KSchema.Record(fields, _), _) => fields
+          case KSchema.Field("address", KSchema.RecordSchema(fields, _), _) => fields
         }.fold(
           fail("Expected record schema")
         ) {
@@ -163,7 +163,7 @@ class AvscTest extends AnyFlatSpec with Matchers:
         fieldBytes: Array[Byte],
         fieldString: String
     )
-    val primitives: KSchema[Primitives] =
+    val primitives: KSchema["example.avro.Primitives" ~ Primitives] =
       Avsc.fromString(
         """|{
            |  "namespace": "example.avro",
@@ -207,9 +207,9 @@ class AvscTest extends AnyFlatSpec with Matchers:
            |""".stripMarginCT
       )
 
-    val test: Primitives = (null, true, 1, 2L, 3.0f, 4.0, Array(1, 2, 3), "example")
+    val test: "example.avro.Primitives" ~ Primitives = Record(null, true, 1, 2L, 3.0f, 4.0, Array(1, 2, 3), "example")
     primitives.deserialize(primitives.serialize(test)) match
-      case Right(
+      case Right("example.avro.Primitives" ~ ((
             fieldNull = fieldNull,
             fieldBoolean = fieldBoolean,
             fieldInt = fieldInt,
@@ -218,19 +218,19 @@ class AvscTest extends AnyFlatSpec with Matchers:
             fieldDouble = fieldDouble,
             fieldBytes = fieldBytes,
             fieldString = fieldString
-          ) =>
+          ))) =>
         (fieldNull, fieldBoolean, fieldInt, fieldLong, fieldFloat, fieldDouble, fieldString) should be(
           (
-            test.fieldNull,
-            test.fieldBoolean,
-            test.fieldInt,
-            test.fieldLong,
-            test.fieldFloat,
-            test.fieldDouble,
-            test.fieldString
+            test.value.fieldNull,
+            test.value.fieldBoolean,
+            test.value.fieldInt,
+            test.value.fieldLong,
+            test.value.fieldFloat,
+            test.value.fieldDouble,
+            test.value.fieldString
           )
         )
-        fieldBytes.sameElements(test.fieldBytes) should be(true)
+        fieldBytes.sameElements(test.value.fieldBytes) should be(true)
       case _ =>
         fail("Expected successfull deserialization")
 
@@ -247,7 +247,7 @@ class AvscTest extends AnyFlatSpec with Matchers:
     val arr = Vector("foo", "bar", "buzz")
     stringArr.deserialize(stringArr.serialize(arr)) should be(Right(arr))
 
-    val usrsSch: KSchema[Vector[(id: Int, name: String)]] =
+    val usrsSch: KSchema[Vector["LineItem" ~ (id: Int, name: String)]] =
       Avsc.fromString(
         """|{
            |  "type": "array",
@@ -269,11 +269,11 @@ class AvscTest extends AnyFlatSpec with Matchers:
            |""".stripMarginCT
       )
 
-    val usrs = Vector[(id: Int, name: String)](1 -> "Bob", 2 -> "John", 3 -> "Cash")
+    val usrs = Vector[(id: Int, name: String)](1 -> "Bob", 2 -> "John", 3 -> "Cash").map(Record(_)["LineItem"])
     usrsSch.deserialize(usrsSch.serialize(usrs)) should be(Right(usrs))
 
   it should "respect round-trip for enums" in:
-    val tlSchema: KSchema["RED" | "YELLOW" | "GREEN"] =
+    val tlSchema: KSchema["com.example.enums.TrafficLight" ~ ("RED" | "YELLOW" | "GREEN")] =
       Avsc.fromString(
         """|{
            |  "type": "enum",
@@ -285,9 +285,10 @@ class AvscTest extends AnyFlatSpec with Matchers:
            |""".stripMarginCT
       )
 
-    val red: "RED"       = valueOf
-    val yellow: "YELLOW" = valueOf
-    val green: "GREEN"   = valueOf
+    type TL[S <: String] = "com.example.enums.TrafficLight" ~ S
+    val red: TL["RED"]       = Enum("RED")
+    val yellow: TL["YELLOW"] = Enum("YELLOW")
+    val green: TL["GREEN"]   = Enum("GREEN")
 
     tlSchema.deserialize(tlSchema.serialize(red)) should be(Right(red))
     tlSchema.deserialize(tlSchema.serialize(yellow)) should be(Right(yellow))
@@ -306,7 +307,7 @@ class AvscTest extends AnyFlatSpec with Matchers:
     val map = Map("foo" -> 1, "bar" -> 2, "buzz" -> 3)
     intMap.deserialize(intMap.serialize(map)) should be(Right(map))
 
-    val usrsSch: KSchema[Map[String, (id: Int, name: String)]] =
+    val usrsSch: KSchema[Map[String, "LineItem" ~ (id: Int, name: String)]] =
       Avsc.fromString(
         """|{
            |  "type": "map",
@@ -328,19 +329,19 @@ class AvscTest extends AnyFlatSpec with Matchers:
            |""".stripMarginCT
       )
 
-    val usrs = Map[String, (id: Int, name: String)](
-      "bob"  -> (1, "Bob"),
-      "john" -> (2, "John"),
-      "cash" -> (3, "Cash")
+    val usrs = Map[String, "LineItem" ~ (id: Int, name: String)](
+      "bob"  -> Record(1, "Bob"),
+      "john" -> Record(2, "John"),
+      "cash" -> Record(3, "Cash")
     )
     usrsSch.deserialize(usrsSch.serialize(usrs)) should be(Right(usrs))
 
   it should "respect round-trip for fixed schemas" in:
-    val fixed5: KSchema[Fixed[5]] =
+    val fixed5: KSchema["MyFixed" ~ BytesN[5]] =
       Avsc.fromString(
         """|{
            |  "type": "fixed",
-           |  "name": "kek",
+           |  "name": "MyFixed",
            |  "size": 5
            |}
            |""".stripMarginCT
@@ -348,5 +349,5 @@ class AvscTest extends AnyFlatSpec with Matchers:
 
     val arr = Array[Byte](42, 43, 44, 45, 46)
     fixed5.deserialize(
-      fixed5.serialize(Fixed.from[5](arr).get)
-    ).map(_.bytes.sameElements(arr)) should be(Right(true))
+      fixed5.serialize(Fixed(BytesN.from[5](arr).get))
+    ).map(_.value.bytes.sameElements(arr)) should be(Right(true))

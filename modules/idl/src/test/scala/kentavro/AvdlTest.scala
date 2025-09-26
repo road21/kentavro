@@ -8,7 +8,7 @@ import org.apache.avro.Schema.Type
 
 class AvdlTest extends AnyFlatSpec with Matchers:
   it should "be able to parse record schemas" in:
-    val recordSch: KSchema[(id: Int, name: String, email: String, age: Int)] =
+    val recordSch: KSchema["com.example.avro.User" ~ (id: Int, name: String, email: String, age: Int)] =
       Avdl.fromString(
         """|namespace com.example.avro;
            |schema User;
@@ -22,7 +22,7 @@ class AvdlTest extends AnyFlatSpec with Matchers:
       )
 
     recordSch match
-      case r: KSchema.Record[?] =>
+      case r: KSchema.RecordSchema[?, ?] =>
         r.fields should have size 4
         r.fields.map(f => (f.name, f.schema.schema)) should be(
           List(
@@ -36,12 +36,12 @@ class AvdlTest extends AnyFlatSpec with Matchers:
         fail("Expected record schema")
 
   it should "be able to parse nested record schemas" in:
-    val recordSch: KSchema[(
+    val recordSch: KSchema["com.example.avro.User" ~ (
         id: Int,
         name: String,
         email: String,
         age: Int,
-        address: (country: String, city: String, street: String)
+        address: "com.example.avro.Address" ~ (country: String, city: String, street: String)
     )] =
       Avdl.fromString(
         """|namespace com.example.avro;
@@ -64,10 +64,10 @@ class AvdlTest extends AnyFlatSpec with Matchers:
       )
 
     recordSch match
-      case r: KSchema.Record[?] =>
+      case r: KSchema.RecordSchema[?, ?] =>
         r.fields should have size 5
         r.fields.collectFirst {
-          case KSchema.Field("address", KSchema.Record(fields, _), _) => fields
+          case KSchema.Field("address", KSchema.RecordSchema(fields, _), _) => fields
         }.fold(
           fail("Expected record schema")
         ) {
