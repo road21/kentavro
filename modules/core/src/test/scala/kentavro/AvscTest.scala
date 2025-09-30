@@ -207,7 +207,9 @@ class AvscTest extends AnyFlatSpec with Matchers:
            |""".stripMarginCT
       )
 
-    val test: "example.avro.Primitives" ~ Primitives = Record(null, true, 1, 2L, 3.0f, 4.0, Array(1, 2, 3), "example")
+    val test: "example.avro.Primitives" ~ Primitives =
+      Named.make(null, true, 1, 2L, 3.0f, 4.0, Array(1, 2, 3), "example")
+
     primitives.deserialize(primitives.serialize(test)) match
       case Right("example.avro.Primitives" ~ ((
             fieldNull = fieldNull,
@@ -269,7 +271,7 @@ class AvscTest extends AnyFlatSpec with Matchers:
            |""".stripMarginCT
       )
 
-    val usrs = Vector[(id: Int, name: String)](1 -> "Bob", 2 -> "John", 3 -> "Cash").map(Record(_)["LineItem"])
+    val usrs = Vector[(id: Int, name: String)](1 -> "Bob", 2 -> "John", 3 -> "Cash").map(Named("LineItem", _))
     usrsSch.deserialize(usrsSch.serialize(usrs)) should be(Right(usrs))
 
   it should "respect round-trip for enums" in:
@@ -286,9 +288,9 @@ class AvscTest extends AnyFlatSpec with Matchers:
       )
 
     type TL[S <: String] = "com.example.enums.TrafficLight" ~ S
-    val red: TL["RED"]       = Enum("RED")
-    val yellow: TL["YELLOW"] = Enum("YELLOW")
-    val green: TL["GREEN"]   = Enum("GREEN")
+    val red: TL["RED"]       = Named.make("RED")
+    val yellow: TL["YELLOW"] = Named.make("YELLOW")
+    val green: TL["GREEN"]   = Named.make("GREEN")
 
     tlSchema.deserialize(tlSchema.serialize(red)) should be(Right(red))
     tlSchema.deserialize(tlSchema.serialize(yellow)) should be(Right(yellow))
@@ -330,9 +332,9 @@ class AvscTest extends AnyFlatSpec with Matchers:
       )
 
     val usrs = Map[String, "LineItem" ~ (id: Int, name: String)](
-      "bob"  -> Record(1, "Bob"),
-      "john" -> Record(2, "John"),
-      "cash" -> Record(3, "Cash")
+      "bob"  -> Named.make(1, "Bob"),
+      "john" -> Named.make(2, "John"),
+      "cash" -> Named.make(3, "Cash")
     )
     usrsSch.deserialize(usrsSch.serialize(usrs)) should be(Right(usrs))
 
@@ -349,5 +351,5 @@ class AvscTest extends AnyFlatSpec with Matchers:
 
     val arr = Array[Byte](42, 43, 44, 45, 46)
     fixed5.deserialize(
-      fixed5.serialize(Fixed(BytesN.from[5](arr).get))
+      fixed5.serialize(Named.make(BytesN.from[5](arr).get))
     ).map(_.value.bytes.sameElements(arr)) should be(Right(true))
