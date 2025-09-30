@@ -13,7 +13,7 @@ import scala.reflect.ClassTag
 import scala.jdk.CollectionConverters.*
 import scala.collection.immutable.ListSet
 import org.apache.avro.generic.GenericData.EnumSymbol
-import kentavro.data.Fixed
+import kentavro.BytesN
 import org.apache.avro.generic.GenericFixed
 import org.apache.avro.specific.{SpecificData, SpecificDatumReader, SpecificDatumWriter, SpecificFixed}
 import org.apache.avro.io.{DatumReader, DatumWriter}
@@ -30,94 +30,85 @@ import org.apache.avro.io.{DatumReader, DatumWriter}
 trait KSchema[T]:
   type Type = T
 
+  type JType <: AnyRef
+  def isJType(value: Any): Option[JType]
+  def JTypeClassName: String
+
   def schema: Schema
 
   def serialize(data: T): Array[Byte] =
-    KSchema.serializeUnsafe(serializeToObject(data), schema)
+    KSchema.serializeUnsafe(serializeToJType(data), schema)
 
   def deserialize(bytes: Array[Byte]): Either[String, T] =
-    KSchema.deserializeUnsafe(bytes, schema).flatMap(deserializeFromObject)
+    KSchema.deserializeUnsafe(bytes, schema).flatMap {
+      x =>
+        isJType(x) match
+          case Some(j) => deserializeFromJType(j)
+          case _       => Left(s"Expected $JTypeClassName, got ${x.getClass()}")
+    }
 
-  protected def serializeToObject(data: T): AnyRef
-  protected def deserializeFromObject(obj: AnyRef): Either[String, T]
+  def serializeToJType(data: T): JType
+  def deserializeFromJType(obj: JType): Either[String, T]
 
 object KSchema:
+  trait WithJClassTag[_JType <: AnyRef](using classTag: ClassTag[_JType]):
+    self: KSchema[?] =>
+
+    override type JType = _JType
+
+    override val JTypeClassName: String = classTag.runtimeClass.toString()
+
+    override def isJType(value: Any): Option[JType] =
+      classTag.unapply(value)
+
+  trait NamedSchema[Name <: String & Singleton, T](using ValueOf[Name]) extends KSchema[Name ~ T]:
+    final val name: Name = valueOf[Name]
+
   trait Primitive[T] extends KSchema[T]
+
+  trait PrimitiveWithJClassTag[T, _JType <: AnyRef] extends WithJClassTag[_JType], Primitive[T]
 
   object Primitive:
     case class NullSchema(override val schema: Schema)
       extends Primitive[Null]:
-      override protected def serializeToObject(data: Null): AnyRef = data
-      override protected def deserializeFromObject(
-          obj: AnyRef
-      ): Either[String, Null] =
-        Either.cond(obj == null, null, s"Expected null, got $obj")
+      override type JType = Null
+
+      override def isJType(value: Any): Option[Null] =
+        Option.when(value == null)(null)
+      override val JTypeClassName: String = "Null"
+
+      override def serializeToJType(data: Null): Null                    = data
+      override def deserializeFromJType(obj: Null): Either[String, Null] = Right(null)
 
     case class BooleanSchema(override val schema: Schema)
-      extends Primitive[Boolean]:
-      override protected def serializeToObject(data: Boolean): AnyRef                    = data: java.lang.Boolean
-      override protected def deserializeFromObject(obj: AnyRef): Either[String, Boolean] =
-        obj match
-          case o: java.lang.Boolean => Right(o)
-          case _                    => Left(s"Expected boolean, got ${obj.getClass()}")
+      extends PrimitiveWithJClassTag[Boolean, java.lang.Boolean]:
+      override def serializeToJType(data: Boolean): JType                    = data
+      override def deserializeFromJType(obj: JType): Either[String, Boolean] = Right(obj)
 
-    case class IntSchema(override val schema: Schema) extends Primitive[Int]:
-      override protected def serializeToObject(data: Int): AnyRef = data: Integer
+    case class IntSchema(override val schema: Schema) extends PrimitiveWithJClassTag[Int, java.lang.Integer]:
+      override def serializeToJType(data: Int): java.lang.Integer          = data
+      override def deserializeFromJType(obj: Integer): Either[String, Int] = Right(obj)
 
-      override protected def deserializeFromObject(
-          obj: AnyRef
-      ): Either[String, Int] =
-        obj match
-          case i: Integer => Right(i)
-          case _          => Left(s"Expected int, got ${obj.getClass()}")
+    case class LongSchema(override val schema: Schema) extends PrimitiveWithJClassTag[Long, java.lang.Long]:
+      override def serializeToJType(data: Long): JType                    = data
+      override def deserializeFromJType(obj: JType): Either[String, Long] = Right(obj)
 
-    case class LongSchema(override val schema: Schema)
-      extends Primitive[Long]:
-      override protected def serializeToObject(data: Long): AnyRef                    = data: java.lang.Long
-      override protected def deserializeFromObject(obj: AnyRef): Either[String, Long] =
-        obj match
-          case l: java.lang.Long => Right(obj.asInstanceOf[java.lang.Long])
-          case _                 => Left(s"Expected long, got ${obj.getClass()}")
+    case class FloatSchema(override val schema: Schema) extends PrimitiveWithJClassTag[Float, java.lang.Float]:
+      override def serializeToJType(data: Float): JType                    = data
+      override def deserializeFromJType(obj: JType): Either[String, Float] = Right(obj)
 
-    case class FloatSchema(override val schema: Schema)
-      extends Primitive[Float]:
-      override protected def serializeToObject(data: Float): AnyRef                    = data: java.lang.Float
-      override protected def deserializeFromObject(obj: AnyRef): Either[String, Float] =
-        obj match
-          case f: java.lang.Float => Right(f)
-          case _                  => Left(s"Expected float, got ${obj.getClass()}")
+    case class DoubleSchema(override val schema: Schema) extends PrimitiveWithJClassTag[Double, java.lang.Double]:
+      override def serializeToJType(data: Double): JType                    = data
+      override def deserializeFromJType(obj: JType): Either[String, Double] = Right(obj)
 
-    case class DoubleSchema(override val schema: Schema)
-      extends Primitive[Double]:
-      override protected def serializeToObject(data: Double): AnyRef = data: java.lang.Double
-      override protected def deserializeFromObject(
-          obj: AnyRef
-      ): Either[String, Double] =
-        obj match
-          case d: java.lang.Double => Right(d)
-          case _                   => Left(s"Expected double, got ${obj.getClass()}")
-
-    case class ArrayByteSchema(override val schema: Schema)
-      extends Primitive[Array[Byte]]:
-      override protected def serializeToObject(data: Array[Byte]): AnyRef =
-        ByteBuffer.wrap(data)
-      override protected def deserializeFromObject(
-          obj: AnyRef
-      ): Either[String, Array[Byte]] =
-        obj match
-          case b: ByteBuffer => Right(b.array())
-          case _             => Left(s"Expected Array[Byte] (ByteBuffer), got ${obj.getClass()}")
+    case class ArrayByteSchema(override val schema: Schema) extends PrimitiveWithJClassTag[Array[Byte], ByteBuffer]:
+      override def serializeToJType(data: Array[Byte]): JType                    = ByteBuffer.wrap(data)
+      override def deserializeFromJType(obj: JType): Either[String, Array[Byte]] = Right(obj.array())
 
     case class StringSchema(override val schema: Schema)
-      extends Primitive[String]:
-      override protected def serializeToObject(data: String): AnyRef =
-        org.apache.avro.util.Utf8(data)
-      override protected def deserializeFromObject(
-          obj: AnyRef
-      ): Either[String, String] =
-        obj match
-          case s: org.apache.avro.util.Utf8 => Right(s.toString)
-          case _                            => Left(s"Expected string, got ${obj.getClass()}")
+      extends PrimitiveWithJClassTag[String, org.apache.avro.util.Utf8]:
+      override def serializeToJType(data: String): JType                    = org.apache.avro.util.Utf8(data)
+      override def deserializeFromJType(obj: JType): Either[String, String] = Right(obj.toString)
 
   case class Field[Name <: String & Singleton, T](
       name: Name,
@@ -125,94 +116,92 @@ object KSchema:
       default: Option[T] = None
   )
 
-  case class Record[T <: AnyNamedTuple](
+  case class RecordSchema[Name <: String & Singleton, T <: AnyNamedTuple](
       fields: List[Field[?, ?]],
       schema: Schema
-  ) extends KSchema[T]:
-    override protected def serializeToObject(data: T): AnyRef =
+  )(using ValueOf[Name]) extends NamedSchema[Name, T], WithJClassTag[GenericRecord]:
+    override def serializeToJType(data: Name ~ T): JType =
       val record = new GenericData.Record(schema)
-      val values = NamedTuple.toList(data.asInstanceOf)
+      val values = NamedTuple.toList(data.value.asInstanceOf)
       values.lazyZip(fields).foreach { case (value, field: Field[?, t]) =>
         record.put(
           field.name,
-          field.schema.serializeToObject(value.asInstanceOf[t])
+          field.schema.serializeToJType(value.asInstanceOf[t])
         )
       }
       record
 
-    override protected def deserializeFromObject(
-        obj: Object
-    ): Either[String, T] =
-      obj match
-        case g: GenericRecord =>
-          val (errs, succ) = fields.partitionMap(f =>
-            f.schema.deserializeFromObject(g.get(f.name))
-          )
-          Either.cond(
-            errs.isEmpty,
-            Tuple.fromArray(succ.toArray).asInstanceOf[T],
-            errs.mkString(",")
-          )
-        case _ => Left(s"Expected record, got: ${obj.getClass()}")
+    override def deserializeFromJType(
+        obj: JType
+    ): Either[String, Name ~ T] =
+      val (errs, succ) = fields.partitionMap { f =>
+        val v = obj.get(f.name)
+        f.schema.isJType(v) match
+          case Some(j) => f.schema.deserializeFromJType(j)
+          case None    => Left(s"Expected ${f.schema.JTypeClassName}, got: $v")
+      }
+      Either.cond(
+        errs.isEmpty,
+        Named.make(Tuple.fromArray(succ.toArray).asInstanceOf[T]),
+        errs.mkString(",")
+      )
 
   case class ArraySchema[T: ClassTag](
       override val schema: Schema,
       element: KSchema[T]
-  ) extends KSchema[Vector[T]]:
-    override protected def serializeToObject(data: Vector[T]): AnyRef =
-      data.map(element.serializeToObject).asJavaCollection
+  ) extends WithJClassTag[java.util.Collection[?]], KSchema[Vector[T]]:
+    override def serializeToJType(data: Vector[T]): java.util.Collection[?] =
+      data.map(element.serializeToJType).asJavaCollection
 
-    override protected def deserializeFromObject(obj: AnyRef): Either[String, Vector[T]] =
-      obj match
-        case c: java.util.Collection[?] =>
-          val arr           = c.asScala.toVector
-          val (errs, succs) = arr.partitionMap(element.deserializeFromObject)
-          if (errs.nonEmpty) Left(errs.mkString(", "))
-          else Right(succs)
-        case _ => Left(s"Expected array (java.util.Collection), got: ${obj.getClass()}")
+    override def deserializeFromJType(obj: java.util.Collection[?]): Either[String, Vector[T]] =
+      val arr           = obj.asScala.toVector
+      val (errs, succs) = arr.partitionMap { x =>
+        element.isJType(x) match
+          case Some(j) => element.deserializeFromJType(j)
+          case None    => Left(s"Expected ${element.JTypeClassName}, got: $x")
+      }
+      Either.cond(errs.isEmpty, succs, errs.mkString(", "))
 
   case class MapSchema[T](
       override val schema: Schema,
       value: KSchema[T]
-  ) extends KSchema[Map[String, T]]:
-    override protected def serializeToObject(data: Map[String, T]): AnyRef =
-      data.mapValues(value.serializeToObject).toMap.asJava
+  ) extends WithJClassTag[java.util.Map[org.apache.avro.util.Utf8, ?]], KSchema[Map[String, T]]:
+    override def serializeToJType(data: Map[String, T]): java.util.Map[org.apache.avro.util.Utf8, ?] =
+      data.map((k, v) =>
+        org.apache.avro.util.Utf8(k) -> value.serializeToJType(v)
+      ).toMap.asJava
 
-    override protected def deserializeFromObject(obj: AnyRef): Either[String, Map[String, T]] =
-      obj match
-        case jm: java.util.Map[?, ?] =>
-          val m             = jm.asScala
-          val (errs, succs) = m.partitionMap {
-            case (key: org.apache.avro.util.Utf8, v) =>
-              value.deserializeFromObject(v).map(key.toString -> _)
-            case (key, _) => Left(s"key $key is not a string")
-          }
-          if (errs.nonEmpty) Left(errs.mkString(", "))
-          else Right(succs.toMap)
-        case _ => Left(s"Expected map (java.util.Map), got: ${obj.getClass()}")
+    override def deserializeFromJType(
+        obj: java.util.Map[org.apache.avro.util.Utf8, ?]
+    ): Either[String, Map[String, T]] =
+      val m             = obj.asScala
+      val (errs, succs) = m.partitionMap {
+        case (key, v) =>
+          value.isJType(v) match
+            case Some(j) => value.deserializeFromJType(j).map(key.toString -> _)
+            case None    => Left(s"Expected ${value.JTypeClassName}, got: $key")
+      }
+      Either.cond(errs.isEmpty, succs.toMap, errs.mkString(", "))
 
-  case class EnumSchema[T <: String](
+  case class EnumSchema[Name <: String & Singleton, T <: String](
       override val schema: Schema,
       symbols: ListSet[String]
-  ) extends KSchema[T]:
-    override protected def serializeToObject(data: T): AnyRef =
-      EnumSymbol(schema, data)
+  )(using ValueOf[Name]) extends NamedSchema[Name, T], WithJClassTag[EnumSymbol]:
+    override def serializeToJType(data: Name ~ T): EnumSymbol =
+      EnumSymbol(schema, data.value)
 
-    override protected def deserializeFromObject(obj: AnyRef): Either[String, T] =
-      obj match
-        case e: EnumSymbol =>
-          val str = e.toString
-          Right(str.asInstanceOf[T])
-        case _ => Left(s"Expected symbol (string), got ${obj.getClass()}")
+    override def deserializeFromJType(obj: EnumSymbol): Either[String, Name ~ T] =
+      val str = obj.toString
+      Right(Named.make(str.asInstanceOf[T]))
 
-  case class FixedSchema[T <: Int & Singleton](
+  case class FixedSchema[Name <: String & Singleton, T <: Int & Singleton](
       override val schema: Schema,
       size: Int
-  )(using ValueOf[T]) extends KSchema[Fixed[T]]:
-    override protected def serializeToObject(data: Fixed[T]): AnyRef =
+  )(using ValueOf[T], ValueOf[Name]) extends NamedSchema[Name, BytesN[T]], WithJClassTag[GenericFixed]:
+    override def serializeToJType(data: Name ~ BytesN[T]): GenericFixed =
       new SpecificFixed:
         self =>
-        override val bytes: Array[Byte]                  = data.bytes
+        override val bytes: Array[Byte]                  = data.value.bytes
         override def getSchema(): org.apache.avro.Schema = schema
 
         val writer: DatumWriter[AnyRef]                             = new SpecificDatumWriter[AnyRef](schema)
@@ -223,14 +212,13 @@ object KSchema:
         def readExternal(in: java.io.ObjectInput): Unit =
           reader.read(self, SpecificData.getDecoder(in))
 
-    override protected def deserializeFromObject(
-        obj: AnyRef
-    ): Either[String, Fixed[T]] =
-      obj match
-        case b: GenericFixed =>
-          val arr = b.bytes()
-          Fixed.from[T](arr).toRight(s"Expected array of bytes with size $size, got: size ${arr.length}")
-        case _ => Left(s"Expected Array[Byte] (ByteBuffer), got ${obj.getClass()}")
+    override def deserializeFromJType(
+        obj: GenericFixed
+    ): Either[String, Name ~ BytesN[T]] =
+      val arr = obj.bytes()
+      BytesN.from[T](
+        arr
+      ).toRight(s"Expected array of bytes with size $size, got: size ${arr.length}").map(Named.make(_))
 
   private def serializeUnsafe(obj: Object, schema: Schema): Array[Byte] = {
     val writer  = new GenericDatumWriter[Object](schema)

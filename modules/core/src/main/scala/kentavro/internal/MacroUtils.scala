@@ -7,9 +7,9 @@ import org.apache.avro.Schema.Field
 import java.util.List as JavaList
 import scala.jdk.CollectionConverters.*
 import scala.reflect.ClassTag
-import kentavro.KSchema
+import kentavro.{BytesN, KSchema}
 import scala.collection.immutable.ListSet
-import kentavro.data.Fixed
+import kentavro.~
 
 private[kentavro] object MacroUtils:
   /**
@@ -18,8 +18,8 @@ private[kentavro] object MacroUtils:
   case class RecordBuilder[T <: AnyNamedTuple](
       fields: List[KSchema.Field[?, ?]]
   ):
-    def build(schema: Schema): KSchema[T] =
-      KSchema.Record[T](fields, schema)
+    def build[Name <: String & Singleton](name: Name, schema: Schema): KSchema[Name ~ T] =
+      KSchema.RecordSchema[Name, T](fields, schema)(using ValueOf(name))
 
   /**
     * Parse list of avro fields into Expr[RecordBuilder[?]]
@@ -99,9 +99,16 @@ private[kentavro] object MacroUtils:
       case Schema.Type.RECORD =>
         val fields                       = schema.getFields().asScala.toList
         val (namesRepr, typesRepr, inst) = parseFields(fields)
-        (namesRepr.asType, typesRepr.asType) match
-          case ('[type names <: Tuple; names], '[type types <: Tuple; types]) =>
-            (TypeRepr.of[NamedTuple[names, types]], '{ ${ inst }.build(${ Expr(schema) }) })
+        (Expr(schema.getFullName()), namesRepr.asType, typesRepr.asType) match
+          case (
+                '{ type schemaName <: String & scala.Singleton; $schemaName: schemaName },
+                '[type names <: Tuple; names],
+                '[type types <: Tuple; types]
+              ) =>
+            (
+              TypeRepr.of[schemaName ~ NamedTuple[names, types]],
+              '{ ${ inst }.build[schemaName](${ schemaName }, ${ Expr(schema) }) }
+            )
           case _ =>
             quotes.reflect.report.errorAndAbort("unexpected error")
       case Schema.Type.ARRAY =>
@@ -125,9 +132,19 @@ private[kentavro] object MacroUtils:
         symbols match
           case h :: t =>
             val typ = makeUnionTypeOfLiterals(h, t)
-            typ.asType match
-              case '[type typ <: String; typ] =>
-                (typ, '{ KSchema.EnumSchema[typ](${ Expr(schema) }, ListSet.from(${ Expr(symbols) })) })
+            (Expr(schema.getFullName()), typ.asType) match
+              case (
+                    '{ type schemaName <: String & scala.Singleton; $schemaName: schemaName },
+                    '[type typ <: String; typ]
+                  ) =>
+                (
+                  TypeRepr.of[schemaName ~ typ],
+                  '{
+                    KSchema.EnumSchema[schemaName, typ](${ Expr(schema) }, ListSet.from(${ Expr(symbols) }))(using
+                      ValueOf(${ schemaName })
+                    )
+                  }
+                )
               case _ => quotes.reflect.report.errorAndAbort("unexpected error")
           case _ =>
             quotes.reflect.report.errorAndAbort("enums should contain at least one symbol")
@@ -142,16 +159,21 @@ private[kentavro] object MacroUtils:
             )
       case Schema.Type.FIXED =>
         val size = schema.getFixedSize()
-        Expr(size) match
-          case '{ type s <: Int & scala.Singleton; $s: s } =>
-            Expr.summon[ValueOf[s]] match
-              case Some(valueOf) =>
-                (
-                  TypeRepr.of[Fixed[s]],
-                  '{ KSchema.FixedSchema[s](${ Expr(schema) }, ${ Expr(size) })(using ${ valueOf }) }
+        (Expr(schema.getFullName()), Expr(size)) match
+          case (
+                '{ type schemaName <: String & scala.Singleton; $schemaName: schemaName },
+                '{ type s <: Int & scala.Singleton; $s: s }
+              ) =>
+
+            (
+              TypeRepr.of[schemaName ~ BytesN[s]],
+              '{
+                KSchema.FixedSchema[schemaName, s](${ Expr(schema) }, ${ Expr(size) })(using
+                  ValueOf(${ s }),
+                  ValueOf(${ schemaName })
                 )
-              case None =>
-                quotes.reflect.report.errorAndAbort("unexpected error")
+              }
+            )
           case _ =>
             quotes.reflect.report.errorAndAbort("unexpected error")
       case _ =>
