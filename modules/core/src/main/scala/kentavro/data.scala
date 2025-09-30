@@ -4,7 +4,7 @@ import scala.NamedTuple
 import scala.NamedTuple.AnyNamedTuple
 
 /**
-  * Runtime representation of named avro types (records, fixed, enums)
+  * Representation of named avro types (records, fixed, enums)
   * For example, for fixed type sized 10 named "custom": `"Custom" ~ BytesN[10]`
   */
 case class ~[Name <: String & Singleton, +V](val name: Name, val value: V)
