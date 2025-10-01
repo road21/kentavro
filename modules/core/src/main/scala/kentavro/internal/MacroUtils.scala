@@ -10,6 +10,8 @@ import scala.reflect.ClassTag
 import kentavro.{BytesN, KSchema}
 import scala.collection.immutable.ListSet
 import kentavro.~
+import kentavro.KSchema.{ArraySchema, MapSchema, NamedSchema, Primitive, Tag, UnionSchema}
+import scala.collection.immutable.ListMap
 
 private[kentavro] object MacroUtils:
   /**
@@ -67,6 +69,15 @@ private[kentavro] object MacroUtils:
           TypeRepr.of[EmptyTuple],
           '{ RecordBuilder[NamedTuple.Empty](Nil) }
         )
+
+  def unionOf(using
+      Quotes
+  )(fst: quotes.reflect.TypeRepr, other: List[quotes.reflect.TypeRepr]): quotes.reflect.TypeRepr =
+    import quotes.reflect.*
+    other match
+      case head :: next =>
+        OrType(fst, unionOf(head, next))
+      case Nil => fst
 
   /**
     * Parse avro schema into Expr[KSchema[?]]
@@ -176,10 +187,33 @@ private[kentavro] object MacroUtils:
             )
           case _ =>
             quotes.reflect.report.errorAndAbort("unexpected error")
-      case _ =>
-        quotes.reflect.report.errorAndAbort(
-          "not implemented yet" // TODO: support all avro types
-        )
+      case Schema.Type.UNION =>
+        val (types, schemas) = schema.getTypes().asScala.toList.map(parseSchema).unzip
+        val insts            = Expr.ofList(schemas)
+        types match
+          case h :: t =>
+            val resultType = unionOf(h, t)
+            resultType.asType match
+              case '[t] =>
+                (
+                  resultType,
+                  '{
+                    KSchema.UnionSchema[t](
+                      ${ Expr(schema) },
+                      ListMap.from(${ insts }.map {
+                        case s: Primitive[?, ?]   => s.tag                -> s
+                        case s: NamedSchema[?, ?] => Tag.NamedTag(s.name) -> s
+                        case s: ArraySchema[?]    => Tag.ArrayTag         -> s
+                        case s: MapSchema[?]      => Tag.MapTag           -> s
+                        case s: UnionSchema[?]    => throw new Exception("shouldn't be thrown")
+                      })
+                    )
+                  }
+                )
+              case _ =>
+                quotes.reflect.report.errorAndAbort("unexpected error")
+          case _ =>
+            quotes.reflect.report.errorAndAbort("union can't be empty")
 
   def makeUnionTypeOfLiterals(head: String, tail: List[String])(using Quotes): quotes.reflect.TypeRepr =
     import quotes.reflect.*
@@ -261,7 +295,5 @@ private[kentavro] object MacroUtils:
               ${ Expr(x.getFields()) }
             )
           }
-        case Schema.Type.UNION => // TODO: support all avro types
-          quotes.reflect.report.errorAndAbort(
-            s"type union is not supported yet"
-          )
+        case Schema.Type.UNION =>
+          '{ Schema.createUnion(${ Expr(x.getTypes()) }) }
