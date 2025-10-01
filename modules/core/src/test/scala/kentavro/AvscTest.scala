@@ -353,3 +353,60 @@ class AvscTest extends AnyFlatSpec with Matchers:
     fixed5.deserialize(
       fixed5.serialize(Named.make(BytesN.from[5](arr).get))
     ).map(_.value.bytes.sameElements(arr)) should be(Right(true))
+
+  it should "respect round-trip for unions" in:
+    val schema: KSchema["MyRecord" ~ (field: Int | Boolean)] =
+      Avsc.fromString(
+        """|{
+           |  "type": "record",
+           |  "name": "MyRecord",
+           |  "fields": [
+           |    {
+           |      "name": "field",
+           |      "type": ["int", "boolean"]
+           |    }
+           |  ]
+           |}
+           |""".stripMarginCT
+      )
+
+    val bv = Named("MyRecord", (field = true))
+    schema.deserialize(schema.serialize(bv)) should be(Right(bv))
+
+    val iv = Named("MyRecord", (field = 42))
+    schema.deserialize(schema.serialize(iv)) should be(Right(iv))
+
+  it should "respect round-trip for unions of named schemas" in:
+    val schema: KSchema[
+      "com.example.assets.Picture" ~ (url: String, caption: String) |
+        "com.example.assets.Video" ~ (url: String, durationSeconds: Int)
+    ] =
+      Avsc.fromString(
+        """|
+           |[
+           |  {
+           |    "type": "record",
+           |    "name": "Picture",
+           |    "namespace": "com.example.assets",
+           |    "fields": [
+           |      {"name": "url", "type": "string"},
+           |      {"name": "caption", "type": ["null", "string"], "default": null}
+           |    ]
+           |  },
+           |  {
+           |    "type": "record",
+           |    "name": "Video",
+           |    "namespace": "com.example.assets",
+           |    "fields": [
+           |      {"name": "url", "type": "string"},
+           |      {"name": "durationSeconds", "type": "int"}
+           |    ]
+           |  }
+           |]""".stripMarginCT
+      )
+
+    val bv = Named("com.example.assets.Picture", (url = "url", caption = "cap"))
+    schema.deserialize(schema.serialize(bv)) should be(Right(bv))
+
+    val iv = Named("com.example.assets.Video", (url = "url2", durationSeconds = 42))
+    schema.deserialize(schema.serialize(iv)) should be(Right(iv))
