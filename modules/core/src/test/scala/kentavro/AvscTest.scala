@@ -233,8 +233,8 @@ class AvscTest extends AnyFlatSpec with Matchers:
           )
         )
         fieldBytes.sameElements(test.value.fieldBytes) should be(true)
-      case _ =>
-        fail("Expected successfull deserialization")
+      case Left(err) =>
+        fail(s"Expected successfull deserialization, got: $err")
 
   it should "respect round-trip for array schemas" in:
     val stringArr: KSchema[Vector[String]] =

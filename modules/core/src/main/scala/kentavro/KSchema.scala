@@ -4,7 +4,7 @@ import NamedTuple.AnyNamedTuple
 import org.apache.avro.Schema
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
-import org.apache.avro.generic.{GenericData, GenericDatumReader, GenericDatumWriter, GenericRecord}
+import org.apache.avro.generic.{GenericData, GenericDatumReader, GenericDatumWriter, GenericFixed, GenericRecord}
 import org.apache.avro.io.{DecoderFactory, EncoderFactory}
 
 import scala.util.Try
@@ -14,11 +14,11 @@ import scala.jdk.CollectionConverters.*
 import scala.collection.immutable.ListSet
 import org.apache.avro.generic.GenericData.EnumSymbol
 import kentavro.BytesN
-import org.apache.avro.generic.GenericFixed
 import org.apache.avro.specific.{SpecificData, SpecificDatumReader, SpecificDatumWriter, SpecificFixed}
 import org.apache.avro.io.{DatumReader, DatumWriter}
 import kentavro.KSchema.Tag.TaggedValue
 import scala.collection.immutable.SeqMap
+import org.apache.avro.generic.GenericContainer
 
 /**
   * Representation of {@link apache.avro.Schema Schema} that keeps information about types on type-level.
@@ -44,7 +44,9 @@ trait KSchema[T]:
       x =>
         isJType(x) match
           case Some(j) => deserializeFromJType(j)
-          case _       => Left(s"Expected $JTypeClassName, got ${x.getClass()}")
+          case _       => Left(
+              s"Expected $JTypeClassName, got ${x.toString()}: ${x.getClass()}"
+            )
     }
 
   def serializeToJType(data: T): JType
@@ -111,9 +113,9 @@ object KSchema:
         case v: org.apache.avro.util.Utf8 => Some(TaggedValue(StringTag)(v))
         case v: java.util.Collection[?]   => Some(TaggedValue(ArrayTag)(v))
         case v: java.util.Map[?, ?]       => Some(TaggedValue(MapTag)(v))
-        case v: EnumSymbol                => Some(TaggedValue(EnumTag(v.getSchema().getName()))(v))
-        case v: GenericRecord             => Some(TaggedValue(RecordTag(v.getSchema().getName()))(v))
-        case v: GenericFixed              => Some(TaggedValue(FixedTag(v.getSchema().getName()))(v))
+        case v: EnumSymbol                => Some(TaggedValue(EnumTag(v.getSchema().getFullName()))(v))
+        case v: GenericRecord             => Some(TaggedValue(RecordTag(v.getSchema().getFullName()))(v))
+        case v: GenericFixed              => Some(TaggedValue(FixedTag(v.getSchema().getFullName()))(v))
         case _                            => None
 
   trait NamedSchema[Name <: Singleton & String, T](using ValueOf[Name]) extends KSchema[Name ~ T]:
@@ -176,11 +178,11 @@ object KSchema:
       schema: Schema
   )(using ValueOf[Name]) extends NamedSchema[Name, T]:
     override type JType = GenericRecord
-    override val JTypeClassName: String             = "GenericRecord"
+    override val JTypeClassName: String             = s"GenericRecord(name = ${name})"
     override def isJType(value: Any): Option[JType] =
       value match
-        case d: GenericRecord if (d.getSchema().getName() == name) => Some(d)
-        case _                                                     => None
+        case d: GenericRecord if (d.getSchema().getFullName() == name) => Some(d)
+        case _                                                         => None
 
     override def serializeToJType(data: Name ~ T): GenericRecord =
       val record = new GenericData.Record(schema)
@@ -262,11 +264,11 @@ object KSchema:
       symbols: ListSet[String]
   )(using ValueOf[Name]) extends NamedSchema[Name, T]:
     override type JType = EnumSymbol
-    override val JTypeClassName: String             = "EnumSymbol"
+    override val JTypeClassName: String             = s"EnumSymbol(name = ${name})"
     override def isJType(value: Any): Option[JType] =
       value match
-        case e: EnumSymbol if (e.getSchema().getName() == name) => Some(e)
-        case _                                                  => None
+        case e: EnumSymbol if (e.getSchema().getFullName() == name) => Some(e)
+        case _                                                      => None
 
     override def serializeToJType(data: Name ~ T): EnumSymbol =
       EnumSymbol(schema, data.value)
@@ -280,11 +282,11 @@ object KSchema:
       size: Int
   )(using ValueOf[T], ValueOf[Name]) extends NamedSchema[Name, BytesN[T]]:
     override type JType = GenericFixed
-    override val JTypeClassName: String             = "GenericFixed"
+    override val JTypeClassName: String             = s"GenericFixed(name = ${name})"
     override def isJType(value: Any): Option[JType] =
       value match
-        case d: GenericFixed if (d.getSchema().getName() == name) => Some(d)
-        case _                                                    => None
+        case d: GenericFixed if (d.getSchema().getFullName() == name) => Some(d)
+        case _                                                        => None
 
     override def serializeToJType(data: Name ~ BytesN[T]): GenericFixed =
       new SpecificFixed:
