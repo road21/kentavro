@@ -11,5 +11,5 @@ import scala.annotation.experimental
       .withImports(BuildInfo.rootDir + "/models")
       .fromFileIn("user.avdl")
 
-  val bytes = s.serialize(s.User("Lol", 42, "", 42, s.Address("", "", "")))
+  val bytes = s.serialize(s.User("Lol", 42, "", 42, s.Address("", "", ""), s.Status.ACTIVE))
   println(s.deserialize(bytes).map(_.value.age))

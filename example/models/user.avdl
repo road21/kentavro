@@ -2,10 +2,18 @@ schema User;
 
 import idl "address.avdl";
 
+enum Status {
+    ACTIVE,
+    INACTIVE,
+    PENDING,
+    SUSPENDED
+}
+
 record User {
     string name;
     int id;
     string email;
     int age = 0;
     Address address;
+    Status status;
 }

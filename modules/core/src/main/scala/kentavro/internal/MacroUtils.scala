@@ -31,20 +31,19 @@ private[kentavro] object MacroUtils:
   )
 
   class Members[Q <: Quotes](using val q: Q)(
-      val typeMembers: Map[String, (cls: q.reflect.Symbol) => q.reflect.Symbol] = Map.empty,
       val decls: Map[String, CompanionDecl[q.type]] = Map.empty,
   ):
     def ++(other: Members[q.type]): Members[q.type] =
-      Members(typeMembers ++ other.typeMembers, decls ++ other.decls)
+      Members(decls ++ other.decls)
 
     def +(name: String, decl: CompanionDecl[q.type]): Members[q.type] =
-      Members(typeMembers, decls + (name -> decl))
+      Members(decls + (name -> decl))
 
     def allDecls(cls: q.reflect.Symbol): List[q.reflect.Symbol] =
-      (typeMembers.values ++ decls.values.map(_.decl)).map(x => x(cls)).toList
+      (decls.values.map(_.decl)).map(x => x(cls)).toList
 
   object Members:
-    def empty[Q <: Quotes](using q: Q): Members[Q] = new Members(Map.empty, Map.empty)
+    def empty[Q <: Quotes](using q: Q): Members[Q] = new Members(Map.empty)
 
   class FieldsParsed[Q <: Quotes](using val q: Q)(
       val names: q.reflect.TypeRepr,
@@ -245,12 +244,29 @@ private[kentavro] object MacroUtils:
         val symbols = schema.getEnumSymbols().asScala.toList
         symbols match
           case h :: t =>
-            val typ = makeUnionTypeOfLiterals(h, t)
-            (Expr(schema.getFullName()), typ.asType) match
+            val (typ, tup) = makeUnionTypeOfLiterals(h, t)
+            val fullName   = schema.getFullName()
+            (Expr(fullName), typ.asType, tup.asType) match
               case (
                     '{ type schemaName <: String & scala.Singleton; $schemaName: schemaName },
-                    '[type typ <: String; typ]
+                    '[type typ <: String; typ],
+                    '[type tup <: Tuple; tup],
                   ) =>
+                val declInst: Expr[NamedCompanion[?, ?]] =
+                  '{ new NamedCompanion.Enum[schemaName, tup](${ schemaName }) }
+
+                val decl = CompanionDecl[quotes.type](
+                  cls =>
+                    Symbol.newVal(
+                      cls,
+                      fullName,
+                      TypeRepr.of[NamedCompanion.Enum[schemaName, tup]],
+                      Flags.EmptyFlags,
+                      Symbol.noSymbol
+                    ),
+                  declInst
+                )
+
                 AvroTypeParsed(
                   TypeRepr.of[schemaName ~ typ],
                   '{
@@ -258,7 +274,7 @@ private[kentavro] object MacroUtils:
                       ValueOf(${ schemaName })
                     )
                   },
-                  Members.empty // TODO
+                  Members(Map(fullName -> decl))
                 )
               case _ => quotes.reflect.report.errorAndAbort("unexpected error")
           case _ =>
@@ -341,7 +357,9 @@ private[kentavro] object MacroUtils:
         val newCls = Apply(Select(New(TypeIdent(cls)), cls.primaryConstructor), Nil)
         Block(List(clsDef), newCls).asExprOf[KSchema[?]]
 
-  def makeUnionTypeOfLiterals(head: String, tail: List[String])(using Quotes): quotes.reflect.TypeRepr =
+  def makeUnionTypeOfLiterals(head: String, tail: List[String])(using
+      Quotes
+  ): (quotes.reflect.TypeRepr, quotes.reflect.TypeRepr) =
     import quotes.reflect.*
 
     val repr = Expr(head) match
@@ -352,8 +370,9 @@ private[kentavro] object MacroUtils:
 
     tail match
       case htail :: ttail =>
-        OrType(repr, makeUnionTypeOfLiterals(htail, ttail))
-      case Nil => repr
+        val (union, tup) = makeUnionTypeOfLiterals(htail, ttail)
+        (OrType(repr, union), TypeRepr.of[*:].appliedTo(List(repr, tup)))
+      case Nil => (repr, TypeRepr.of[[x] =>> x *: EmptyTuple].appliedTo(repr))
 
   given [A: ToExpr: Type] => ToExpr[JavaList[A]]:
     def apply(x: JavaList[A])(using Quotes): Expr[JavaList[A]] =
