@@ -34,6 +34,12 @@ object Avsc:
   ): KSchema[?] =
     ${ AvscImpl.fromString('schema) }
 
+  @experimental
+  transparent inline def fromStringType(
+      inline schema: String
+  ): AvroType[?] =
+    ${ AvscImpl.fromStringType('schema) }
+
   /**
     * Parse avsc schema from file to {@link kentavro.KSchema KSchema}.
     * The file will be read in compile-time and parsed into {@link kentavro.KSchema KSchema}.
@@ -87,5 +93,24 @@ private[kentavro] object AvscImpl:
     schema.value match
       case Some(value) =>
         parseString(value)
+      case _ =>
+        quotes.reflect.report.errorAndAbort("expected string literal value (avsc schema)")
+
+  @experimental
+  def fromStringType(schema: Expr[String])(using Quotes): Expr[AvroType[?]] =
+    import quotes.reflect.*
+    schema.value match
+      case Some(value) =>
+        scala.util.Try(
+          new Schema.Parser().parse(value)
+        ) match
+          case Success(res) =>
+            // Symbol.newVal()
+            // val vdef = ValDef("")
+            MacroUtils.parseAvroType(res).inst.asTerm.asExprOf[AvroType[?]]
+          case Failure(ex) =>
+            quotes.reflect.report.errorAndAbort(
+              "Unable to parse schema: " + ex.getMessage()
+            )
       case _ =>
         quotes.reflect.report.errorAndAbort("expected string literal value (avsc schema)")

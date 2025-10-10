@@ -5,10 +5,12 @@ import org.scalatest.matchers.should.Matchers
 import org.apache.avro.Schema
 import kentavro.Utils.stripMarginCT
 import org.apache.avro.Schema.Type
+import scala.annotation.experimental
 
+@experimental
 class AvdlTest extends AnyFlatSpec with Matchers:
   it should "be able to parse record schemas" in:
-    val recordSch: AvroType["com.example.avro.User" ~ (id: Int, name: String, email: String, age: Int)] =
+    val recordSch: KSchema["com.example.avro.User" ~ (id: Int, name: String, email: String, age: Int)] =
       Avdl.fromString(
         """|namespace com.example.avro;
            |schema User;
@@ -21,7 +23,7 @@ class AvdlTest extends AnyFlatSpec with Matchers:
            |""".stripMarginCT
       )
 
-    recordSch match
+    recordSch.avroType match
       case r: AvroType.RecordSchema[?, ?] =>
         r.fields should have size 4
         r.fields.map(f => (f.name, f.schema.schema)) should be(
@@ -36,7 +38,7 @@ class AvdlTest extends AnyFlatSpec with Matchers:
         fail("Expected record schema")
 
   it should "be able to parse nested record schemas" in:
-    val recordSch: AvroType["com.example.avro.User" ~ (
+    val recordSch: KSchema["com.example.avro.User" ~ (
         id: Int,
         name: String,
         email: String,
@@ -63,7 +65,7 @@ class AvdlTest extends AnyFlatSpec with Matchers:
            |""".stripMarginCT
       )
 
-    recordSch match
+    recordSch.avroType match
       case r: AvroType.RecordSchema[?, ?] =>
         r.fields should have size 5
         r.fields.collectFirst {

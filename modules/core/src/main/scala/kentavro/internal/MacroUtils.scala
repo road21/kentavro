@@ -7,7 +7,7 @@ import org.apache.avro.Schema.Field
 import java.util.List as JavaList
 import scala.jdk.CollectionConverters.*
 import scala.reflect.ClassTag
-import kentavro.{BytesN, AvroType, KSchema}
+import kentavro.{AvroType, BytesN, KSchema}
 import scala.collection.immutable.ListSet
 import kentavro.~
 import kentavro.AvroType.{ArraySchema, MapSchema, NamedSchema, Primitive, Tag, UnionSchema}
@@ -26,37 +26,37 @@ private[kentavro] object MacroUtils:
       AvroType.RecordSchema[Name, T](fields, schema)(using ValueOf(name))
 
   class CompanionDecl[Q <: Quotes](using val q: Q)(
-    val decl: (cls: q.reflect.Symbol) => q.reflect.Symbol,
-    val inst: Expr[NamedCompanion[?, ?]]
+      val decl: (cls: q.reflect.Symbol) => q.reflect.Symbol,
+      val inst: Expr[NamedCompanion[?, ?]]
   )
 
-  class Members[+Q <: Quotes](using val q: Q)(
-    val typeMembers: Map[String, (cls: q.reflect.Symbol) => q.reflect.Symbol] = Map.empty,
-    val decls: Map[String, CompanionDecl[q.type]] = Map.empty,
+  class Members[Q <: Quotes](using val q: Q)(
+      val typeMembers: Map[String, (cls: q.reflect.Symbol) => q.reflect.Symbol] = Map.empty,
+      val decls: Map[String, CompanionDecl[q.type]] = Map.empty,
   ):
-    def ++(other: Members[q.type]): Members[q.type] = 
+    def ++(other: Members[q.type]): Members[q.type] =
       Members(typeMembers ++ other.typeMembers, decls ++ other.decls)
-    
-    def +(name: String, decl: CompanionDecl[q.type]): Members[q.type] = 
+
+    def +(name: String, decl: CompanionDecl[q.type]): Members[q.type] =
       Members(typeMembers, decls + (name -> decl))
-    
-    def allDecls(cls: q.reflect.Symbol): List[q.reflect.Symbol] = 
+
+    def allDecls(cls: q.reflect.Symbol): List[q.reflect.Symbol] =
       (typeMembers.values ++ decls.values.map(_.decl)).map(x => x(cls)).toList
 
   object Members:
     def empty[Q <: Quotes](using q: Q): Members[Q] = new Members(Map.empty, Map.empty)
 
-  class FieldsParsed[+Q <: Quotes](using val q: Q)(
-    val names: q.reflect.TypeRepr,
-    val fieldTypes: q.reflect.TypeRepr,
-    val inst: Expr[RecordBuilder[?]],
-    val members: Members[Q] = Members.empty
+  class FieldsParsed[Q <: Quotes](using val q: Q)(
+      val names: q.reflect.TypeRepr,
+      val fieldTypes: q.reflect.TypeRepr,
+      val inst: (cls: Quotes) ?=> Expr[RecordBuilder[?]],
+      val members: Members[q.type] = Members.empty
   )
 
-  class AvroTypeParsed[+Q <: Quotes](using val q: Q)(
-    val typeArg: q.reflect.TypeRepr,
-    val inst: Expr[AvroType[?]],
-    val members: Members[Q] = Members.empty
+  class AvroTypeParsed[Q <: Quotes](using val q: Q)(
+      val typeArg: q.reflect.TypeRepr,
+      val inst: (cls: Quotes) ?=> Expr[AvroType[?]],
+      val members: Members[q.type] = Members.empty
   )
 
   /**
@@ -75,14 +75,14 @@ private[kentavro] object MacroUtils:
 
     fields match
       case h :: tail =>
-        val avroTypeParsed          = parseAvroType(h.schema())
-        val htype = avroTypeParsed.typeArg
-        val hinst = avroTypeParsed.inst
+        val avroTypeParsed = parseAvroType(h.schema())
+        val htype          = avroTypeParsed.typeArg
+        val hinst          = avroTypeParsed.inst
 
         val fieldsParsed = parseFields(tail)
-        val tnames = fieldsParsed.names
-        val ttypes = fieldsParsed.fieldTypes
-        val tinst = fieldsParsed.inst
+        val tnames       = fieldsParsed.names
+        val ttypes       = fieldsParsed.fieldTypes
+        val tinst        = fieldsParsed.inst
 
         (Expr(h.name()), htype.asType, tnames.asType, ttypes.asType) match
           case (
@@ -149,10 +149,10 @@ private[kentavro] object MacroUtils:
       case Schema.Type.STRING =>
         AvroTypeParsed(TypeRepr.of[String], '{ AvroType.Primitive.StringSchema(${ Expr(schema) }) })
       case Schema.Type.ARRAY =>
-        val elemSchema  = schema.getElementType()
+        val elemSchema     = schema.getElementType()
         val parsedAvroType = parseAvroType(elemSchema)
-        val repr = parsedAvroType.typeArg
-        val sch = parsedAvroType.inst
+        val repr           = parsedAvroType.typeArg
+        val sch            = parsedAvroType.inst
         repr.asType match
           case '[t] =>
             val ct = Expr.summon[ClassTag[t]]
@@ -169,7 +169,7 @@ private[kentavro] object MacroUtils:
                 )
       case Schema.Type.MAP =>
         val valueSchema = schema.getValueType()
-        val parsed = parseAvroType(valueSchema)
+        val parsed      = parseAvroType(valueSchema)
         parsed.typeArg.asType match
           case '[t] =>
             AvroTypeParsed(
@@ -180,7 +180,7 @@ private[kentavro] object MacroUtils:
       case Schema.Type.UNION =>
         val parsed = schema.getTypes().asScala.toList.map(s => parseAvroType[quotes.type](s))
         val types: List[quotes.reflect.TypeRepr] = parsed.map(_.typeArg)
-        val insts = Expr.ofList(parsed.map(_.inst))
+        val insts                                = Expr.ofList(parsed.map(_.inst))
         types match
           case h :: t =>
             val resultType = unionOf(h, t)
@@ -207,13 +207,13 @@ private[kentavro] object MacroUtils:
           case _ =>
             quotes.reflect.report.errorAndAbort("union can't be empty")
       case Schema.Type.RECORD =>
-        val fields                       = schema.getFields().asScala.toList
+        val fields = schema.getFields().asScala.toList
 
         val parsed: FieldsParsed[quotes.type] = parseFields(fields)
-        val namesRepr = parsed.names
-        val typesRepr = parsed.fieldTypes
-        val inst = parsed.inst
-        
+        val namesRepr                         = parsed.names
+        val typesRepr                         = parsed.fieldTypes
+        val inst                              = parsed.inst
+
         val fullName = schema.getFullName()
         (Expr(fullName), namesRepr.asType, typesRepr.asType) match
           case (
@@ -221,9 +221,17 @@ private[kentavro] object MacroUtils:
                 '[type names <: Tuple; names],
                 '[type types <: Tuple; types]
               ) =>
-            val declInst: Expr[NamedCompanion[?, ?]] = '{ new NamedCompanion.Record[schemaName, NamedTuple[names, types]](${ schemaName }) } 
+            val declInst: Expr[NamedCompanion[?, ?]] =
+              '{ new NamedCompanion.Record[schemaName, NamedTuple[names, types]](${ schemaName }) }
             val decl = CompanionDecl[quotes.type](
-              cls => Symbol.newMethod(cls, fullName, TypeRepr.of[NamedCompanion.Record[schemaName, NamedTuple[names, types]]], Flags.Method, Symbol.noSymbol),
+              cls =>
+                Symbol.newVal(
+                  cls,
+                  fullName,
+                  TypeRepr.of[NamedCompanion.Record[schemaName, NamedTuple[names, types]]],
+                  Flags.EmptyFlags,
+                  Symbol.noSymbol
+                ),
               declInst
             )
             AvroTypeParsed[quotes.type](
@@ -277,32 +285,55 @@ private[kentavro] object MacroUtils:
             quotes.reflect.report.errorAndAbort("unexpected error")
 
   @experimental
-  def parseSchema(schema: Schema)(using Quotes): Expr[KSchema[?]] = 
+  def parseSchema(schema: Schema)(using Quotes): Expr[KSchema[?]] =
     import quotes.reflect.*
-    val parsed = parseAvroType(schema)
+    val parsed       = parseAvroType(schema)
     val name: String = "Impl"
 
     parsed.typeArg.asType match
-      case '[typeArg] => 
+      case '[typeArg] =>
         val parents = List(TypeTree.of[Object], TypeTree.of[KSchema[typeArg]])
-        
-        def kSchemaOverride(cls: quotes.reflect.Symbol): List[quotes.reflect.Symbol] = 
+
+        def kSchemaOverride(cls: quotes.reflect.Symbol): List[quotes.reflect.Symbol] =
           List(
-            Symbol.newMethod(cls, "tpe", TypeRepr.of[AvroType[typeArg]], Flags.Method & Flags.Override, Symbol.noSymbol),
-            Symbol.newVal(cls, "values", TypeRepr.of[Map[String, Any]], Flags.Method & Flags.Override, Symbol.noSymbol)
+            Symbol.newVal(cls, "avroType", TypeRepr.of[AvroType[typeArg]], Flags.Override, Symbol.noSymbol),
+            Symbol.newVal(cls, "values", TypeRepr.of[Map[String, Any]], Flags.Override, Symbol.noSymbol)
           )
 
-        val cls = Symbol.newClass(Symbol.spliceOwner, name, parents = parents.map(_.tpe), cls => kSchemaOverride(cls) ++ parsed.members.allDecls(cls), selfType = None)
-        val tpeVal = cls.declaredMethod("tpe").head // fix dirty
-        val tpeValDef = ValDef(tpeVal, Some(parsed.inst.asTerm))
+        val cls = Symbol.newClass(
+          Symbol.spliceOwner,
+          name,
+          parents = parents.map(_.tpe),
+          cls => kSchemaOverride(cls) ++ parsed.members.allDecls(cls),
+          selfType = None
+        )
 
-        val valuesVal = cls.declaredField("values") // fix dirty
-        val valuesExpr = '{ Map.from(${ Expr.ofSeq(parsed.members.decls.map((key, inst) => '{ ${ Expr(key) } -> ${ inst.inst } } ).toSeq) })}
-        val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
+        val tpeVal    = cls.declaredField("avroType")
+        val tpeValDef = {
+          given q2: Quotes = tpeVal.asQuotes
+          ValDef(tpeVal, Some(parsed.inst.asTerm))
+        }
 
-        val valDefs = tpeValDef :: valuesValDef :: parsed.members.decls.map { (name, decl) => 
-          println(s"Name: $name")
-          val method = cls.declaredMethod(name).head // fix dirty
+        val valuesVal = cls.declaredField("values")
+
+        val valuesExpr = '{
+          Map.from(
+            ${
+              Expr.ofSeq(parsed.members.decls.map((key, inst) =>
+                val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
+                '{ ${ Expr(replaced) } -> ${ inst.inst } }
+              ).toSeq)
+            }
+          )
+        }
+
+        val valuesValDef = {
+          given q2: Quotes = valuesVal.asQuotes
+          ValDef(valuesVal, Some(valuesExpr.asTerm))
+        }
+
+        val valDefs = tpeValDef :: valuesValDef :: parsed.members.decls.map { (name, decl) =>
+          val method = cls.declaredField(name)
           ValDef(method, Some(decl.inst.asTerm))
         }.toList
 

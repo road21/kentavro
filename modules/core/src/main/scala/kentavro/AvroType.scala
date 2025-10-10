@@ -186,7 +186,7 @@ object AvroType:
       schema: Schema
   )(using ValueOf[Name]) extends NamedSchema[Name, T]:
     override type JType = GenericRecord
-    override val JTypeDescription: String                = s"GenericRecord(name = ${name})"
+    override val JTypeDescription: String              = s"GenericRecord(name = ${name})"
     override def isJType(value: AnyRef): Option[JType] =
       value match
         case d: GenericRecord if (d.getSchema().getFullName() == name) => Some(d)
@@ -223,7 +223,7 @@ object AvroType:
       element: AvroType[T]
   ) extends AvroType[Vector[T]]:
     override type JType = java.util.Collection[?]
-    override val JTypeDescription: String                = "java.util.Collection[?]"
+    override val JTypeDescription: String              = "java.util.Collection[?]"
     override def isJType(value: AnyRef): Option[JType] =
       value match
         case d: java.util.Collection[?] => Some(d)
@@ -246,7 +246,7 @@ object AvroType:
       value: AvroType[T]
   ) extends AvroType[Map[String, T]]:
     override type JType = java.util.Map[org.apache.avro.util.Utf8, ?]
-    override val JTypeDescription: String                = "java.util.Map[org.apache.avro.util.Utf8, ?]"
+    override val JTypeDescription: String              = "java.util.Map[org.apache.avro.util.Utf8, ?]"
     override def isJType(value: AnyRef): Option[JType] =
       summon[ClassTag[java.util.Map[org.apache.avro.util.Utf8, ?]]].unapply(value)
 
@@ -272,7 +272,7 @@ object AvroType:
       symbols: ListSet[String]
   )(using ValueOf[Name]) extends NamedSchema[Name, T]:
     override type JType = EnumSymbol
-    override val JTypeDescription: String                = s"EnumSymbol(name = ${name})"
+    override val JTypeDescription: String              = s"EnumSymbol(name = ${name})"
     override def isJType(value: AnyRef): Option[JType] =
       value match
         case e: EnumSymbol if (e.getSchema().getFullName() == name) => Some(e)
@@ -290,7 +290,7 @@ object AvroType:
       size: Int
   )(using ValueOf[T], ValueOf[Name]) extends NamedSchema[Name, BytesN[T]]:
     override type JType = GenericFixed
-    override val JTypeDescription: String                = s"GenericFixed(name = ${name})"
+    override val JTypeDescription: String              = s"GenericFixed(name = ${name})"
     override def isJType(value: AnyRef): Option[JType] =
       value match
         case d: GenericFixed if (d.getSchema().getFullName() == name) => Some(d)
