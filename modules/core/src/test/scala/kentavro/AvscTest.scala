@@ -7,32 +7,37 @@ import org.apache.avro.Schema.Type
 import kentavro.Utils.stripMarginCT
 import kentavro.BytesN
 import NamedTuple.withNames
+import scala.annotation.experimental
 
+@experimental
 class AvscTest extends AnyFlatSpec with Matchers:
   it should "be able to parse a primitive schemas" in:
-    val nullSch: KSchema[Null] = Avsc.fromString("""{"type": "null"}""")
+    val nullSch: AvroType[Null] = Avsc.fromStringType("""{"type": "null"}""")
     nullSch.schema should be(Schema.create(Type.NULL))
 
+    val nullSch2: KSchema[Null] = Avsc.fromString("""{"type": "null"}""")
+    nullSch2.avroType.schema should be(Schema.create(Type.NULL))
+
     val boolSch: KSchema[Boolean] = Avsc.fromString("""{"type": "boolean"}""")
-    boolSch.schema should be(Schema.create(Type.BOOLEAN))
+    boolSch.avroType.schema should be(Schema.create(Type.BOOLEAN))
 
     val intSch: KSchema[Int] = Avsc.fromString("""{"type": "int"}""")
-    intSch.schema should be(Schema.create(Type.INT))
+    intSch.avroType.schema should be(Schema.create(Type.INT))
 
     val longSch: KSchema[Long] = Avsc.fromString("""{"type": "long"}""")
-    longSch.schema should be(Schema.create(Type.LONG))
+    longSch.avroType.schema should be(Schema.create(Type.LONG))
 
     val floatSch: KSchema[Float] = Avsc.fromString("""{"type": "float"}""")
-    floatSch.schema should be(Schema.create(Type.FLOAT))
+    floatSch.avroType.schema should be(Schema.create(Type.FLOAT))
 
     val doubleSch: KSchema[Double] = Avsc.fromString("""{"type": "double"}""")
-    doubleSch.schema should be(Schema.create(Type.DOUBLE))
+    doubleSch.avroType.schema should be(Schema.create(Type.DOUBLE))
 
     val bytesSch: KSchema[Array[Byte]] = Avsc.fromString("""{"type": "bytes"}""")
-    bytesSch.schema should be(Schema.create(Type.BYTES))
+    bytesSch.avroType.schema should be(Schema.create(Type.BYTES))
 
     val stringSch: KSchema[String] = Avsc.fromString("""{"type": "string"}""")
-    stringSch.schema should be(Schema.create(Type.STRING))
+    stringSch.avroType.schema should be(Schema.create(Type.STRING))
 
   it should "be able to parse record schemas" in:
     val recordSch: KSchema["example.avro.User" ~ (id: Int, name: String, email: String, age: Int)] =
@@ -63,8 +68,8 @@ class AvscTest extends AnyFlatSpec with Matchers:
            |""".stripMarginCT
       )
 
-    recordSch match
-      case r: KSchema.RecordSchema[?, ?] =>
+    recordSch.avroType match
+      case r: AvroType.RecordSchema[?, ?] =>
         r.fields should have size 4
         r.fields.map(f => (f.name, f.schema.schema)) should be(
           List(
@@ -133,11 +138,11 @@ class AvscTest extends AnyFlatSpec with Matchers:
            |""".stripMarginCT
       )
 
-    recordSch match
-      case r: KSchema.RecordSchema[?, ?] =>
+    recordSch.avroType match
+      case r: AvroType.RecordSchema[?, ?] =>
         r.fields should have size 5
         r.fields.collectFirst {
-          case KSchema.Field("address", KSchema.RecordSchema(fields, _), _) => fields
+          case AvroType.Field("address", AvroType.RecordSchema(fields, _), _) => fields
         }.fold(
           fail("Expected record schema")
         ) {
