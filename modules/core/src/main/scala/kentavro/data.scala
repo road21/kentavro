@@ -8,7 +8,9 @@ import scala.compiletime.constValue
   * Representation of named avro types (records, fixed, enums)
   * For example, for fixed type sized 10 named "custom": `"Custom" ~ BytesN[10]`
   */
-case class ~[Name <: String & Singleton, +V](val name: Name, val value: V)
+case class ~[Name <: String & Singleton, +V](val name: Name, val value: V):
+  override def toString(): String =
+    s"$name($value)"
 
 object Named:
   def apply[Name <: String & Singleton, V](name: Name, value: V): Name ~ V = new ~(name, value)
@@ -41,4 +43,4 @@ object NamedCompanion:
     type Fields = NamedTuple[V, Tuple.Map[V, [x] =>> Name ~ x]]
 
     inline def selectDynamic(fld: String): Any =
-      Named(constValue[fld.type], fld)
+      Named(name, constValue[fld.type])

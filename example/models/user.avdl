@@ -14,6 +14,6 @@ record User {
     int id;
     string email;
     int age = 0;
-    Address address;
+    com.example.kentavro.Address address;
     Status status;
 }
