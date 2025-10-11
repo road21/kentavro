@@ -1,6 +1,5 @@
 package kentavro
 
-import NamedTuple.AnyNamedTuple
 import org.apache.avro.Schema
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
@@ -181,7 +180,7 @@ object AvroType:
       default: Option[T] = None
   )
 
-  case class RecordSchema[Name <: String & Singleton, T <: AnyNamedTuple](
+  case class RecordSchema[Name <: String & Singleton, T <: Tuple](
       fields: List[Field[?, ?]],
       schema: Schema
   )(using ValueOf[Name]) extends NamedSchema[Name, T]:
@@ -194,8 +193,7 @@ object AvroType:
 
     override def serializeToJType(data: Name ~ T): GenericRecord =
       val record = new GenericData.Record(schema)
-      val values = NamedTuple.toList(data.value.asInstanceOf)
-      values.lazyZip(fields).foreach { case (value, field: Field[?, t]) =>
+      data.value.productIterator.zip(fields).foreach { case (value, field: Field[?, t]) =>
         record.put(
           field.name,
           field.schema.serializeToJType(value.asInstanceOf[t])

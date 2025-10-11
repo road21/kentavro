@@ -19,7 +19,7 @@ private[kentavro] object MacroUtils:
   /**
     * Helper class to build KSchema.Record inside macro
     */
-  case class RecordBuilder[T <: AnyNamedTuple](
+  case class RecordBuilder[T <: Tuple](
       fields: List[AvroType.Field[?, ?]]
   ):
     def build[Name <: String & Singleton](name: Name, schema: Schema): AvroType[Name ~ T] =
@@ -94,7 +94,7 @@ private[kentavro] object MacroUtils:
               TypeRepr.of[hname *: names],
               TypeRepr.of[htype *: types],
               ('{
-                RecordBuilder[NamedTuple[hname *: names, htype *: types]](
+                RecordBuilder[htype *: types](
                   AvroType.Field[hname, htype](${ l }, ${ hinst.asInstanceOf[Expr[AvroType[htype]]] }) :: $tinst.fields,
                 )
               }),
@@ -106,7 +106,7 @@ private[kentavro] object MacroUtils:
         FieldsParsed(
           TypeRepr.of[EmptyTuple],
           TypeRepr.of[EmptyTuple],
-          '{ RecordBuilder[NamedTuple.Empty](Nil) },
+          '{ RecordBuilder[EmptyTuple](Nil) },
           Members.empty
         )
 
@@ -221,20 +221,20 @@ private[kentavro] object MacroUtils:
                 '[type types <: Tuple; types]
               ) =>
             val declInst: Expr[NamedCompanion[?, ?]] =
-              '{ new NamedCompanion.Record[schemaName, NamedTuple[names, types]](${ schemaName }) }
+              '{ new NamedCompanion.Record[schemaName, types](${ schemaName }) }
             val decl = CompanionDecl[quotes.type](
               cls =>
                 Symbol.newVal(
                   cls,
                   fullName,
-                  TypeRepr.of[NamedCompanion.Record[schemaName, NamedTuple[names, types]]],
+                  TypeRepr.of[NamedCompanion.Record[schemaName, types]],
                   Flags.EmptyFlags,
                   Symbol.noSymbol
                 ),
               declInst
             )
             AvroTypeParsed[quotes.type](
-              TypeRepr.of[schemaName ~ NamedTuple[names, types]],
+              TypeRepr.of[schemaName ~ types],
               '{ ${ inst }.build[schemaName](${ schemaName }, ${ Expr(schema) }) },
               parsed.members + (fullName, decl)
             )

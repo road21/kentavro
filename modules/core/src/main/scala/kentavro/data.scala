@@ -33,7 +33,7 @@ trait NamedCompanion[Name <: String & Singleton, Base]:
   type Type = Name ~ Base
 
 object NamedCompanion:
-  class Record[Name <: String & Singleton, Base <: AnyNamedTuple](override val name: Name)
+  class Record[Name <: String & Singleton, Base <: Tuple](override val name: Name)
     extends NamedCompanion[Name, Base]:
     def apply(fields: Base): (Name ~ Base) =
       Named.make(fields)(using ValueOf(name))
