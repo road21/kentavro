@@ -11,11 +11,8 @@ import scala.annotation.experimental
 @experimental
 class AvscTest extends AnyFlatSpec with Matchers:
   it should "be able to parse a primitive schemas" in:
-    val nullSch: AvroType[Null] = Avsc.fromStringType("""{"type": "null"}""")
-    nullSch.schema should be(Schema.create(Type.NULL))
-
-    val nullSch2: KSchema[Null] = Avsc.fromString("""{"type": "null"}""")
-    nullSch2.avroType.schema should be(Schema.create(Type.NULL))
+    val nullSch: KSchema[Null] = Avsc.fromString("""{"type": "null"}""")
+    nullSch.avroType.schema should be(Schema.create(Type.NULL))
 
     val boolSch: KSchema[Boolean] = Avsc.fromString("""{"type": "boolean"}""")
     boolSch.avroType.schema should be(Schema.create(Type.BOOLEAN))

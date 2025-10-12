@@ -155,9 +155,9 @@ private[kentavro] object MacroUtils:
           case '[t] =>
             AvroTypeParsed(
               TypeRepr.of[Vector[t]],
-                '{ AvroType.ArraySchema[t](${ Expr(schema) }, ${ sch }.asInstanceOf[AvroType[t]]) },
-                parsedAvroType.members
-              )
+              '{ AvroType.ArraySchema[t](${ Expr(schema) }, ${ sch }.asInstanceOf[AvroType[t]]) },
+              parsedAvroType.members
+            )
       case Schema.Type.MAP =>
         val valueSchema = schema.getValueType()
         val parsed      = parseAvroType(valueSchema)
@@ -336,7 +336,7 @@ private[kentavro] object MacroUtils:
         }
 
         val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
-        val valDefs = tpeValDef :: valuesValDef :: parsed.members.decls.map { (name, decl) =>
+        val valDefs      = tpeValDef :: valuesValDef :: parsed.members.decls.map { (name, decl) =>
           val method = cls.declaredField(name)
           ValDef(method, Some(decl.inst.asTerm))
         }.toList
