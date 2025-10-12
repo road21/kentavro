@@ -8,27 +8,32 @@ import org.apache.avro.idl.IdlReader
 import java.nio.file.Paths
 import java.nio.file.Path
 import java.io.ByteArrayInputStream
+import scala.annotation.experimental
 
 object Avdl:
   def withImports[P <: String & Singleton](path: P): AvdlWithImports[P] =
     new AvdlWithImports[P](path)
 
+  @experimental
   transparent inline def fromString(
       inline avdl: String
   ): KSchema[?] =
     ${ AvdlImpl.fromString('avdl) }
 
+  @experimental
   transparent inline def fromFile(
       inline filePath: String
   ): KSchema[?] =
     ${ AvdlImpl.fromFileSingle('filePath) }
 
   case class AvdlWithImports[Dir <: String & Singleton](dir: Dir) extends AnyVal:
+    @experimental
     transparent inline def fromFileIn(
         inline relativePath: String
     ): KSchema[?] =
       ${ AvdlImpl.fromFileIn[Dir]('relativePath) }
 
+    @experimental
     transparent inline def fromFileOut(
         inline absolutePath: String
     ): KSchema[?] =
@@ -42,6 +47,7 @@ private[kentavro] object AvdlImpl:
       case Failure(e) =>
         quotes.reflect.report.errorAndAbort(s"Failed to read data from file '$path': $e")
 
+  @experimental
   def parseSchema(
       schema: String,
       directory: Path
@@ -53,8 +59,7 @@ private[kentavro] object AvdlImpl:
       ).getMainSchema()
     } match
       case Success(res) if res != null =>
-        val (_, s) = MacroUtils.parseSchema(res)
-        s
+        MacroUtils.parseSchema(res)
       case Success(_) =>
         quotes.reflect.report.errorAndAbort(
           s"No main schema in detected"
@@ -64,6 +69,7 @@ private[kentavro] object AvdlImpl:
           "Unable to parse schema: " + ex.getMessage()
         )
 
+  @experimental
   def fromString(schema: Expr[String])(using Quotes): Expr[KSchema[?]] =
     schema.value match
       case Some(v) =>
@@ -73,8 +79,7 @@ private[kentavro] object AvdlImpl:
           new IdlReader().parse(stream).getMainSchema()
         ) match
           case Success(res) if res != null =>
-            val (_, s) = MacroUtils.parseSchema(res)
-            s
+            MacroUtils.parseSchema(res)
           case Success(_) =>
             quotes.reflect.report.errorAndAbort(
               s"No main schema in detected"
@@ -87,6 +92,7 @@ private[kentavro] object AvdlImpl:
           "expected string literal argument"
         )
 
+  @experimental
   def fromFileSingle(filePath: Expr[String])(using Quotes): Expr[KSchema[?]] =
     filePath.value match
       case Some(v) =>
@@ -94,8 +100,7 @@ private[kentavro] object AvdlImpl:
           new IdlReader().parse(Paths.get(v)).getMainSchema()
         ) match
           case Success(res) if res != null =>
-            val (_, s) = MacroUtils.parseSchema(res)
-            s
+            MacroUtils.parseSchema(res)
           case Success(_) =>
             quotes.reflect.report.errorAndAbort(
               s"No main schema in detected"
@@ -108,6 +113,7 @@ private[kentavro] object AvdlImpl:
           "expected string literal argument"
         )
 
+  @experimental
   def fromFileIn[Dir <: Singleton & String: Type](fileName: Expr[String])(using Quotes): Expr[KSchema[?]] =
     (fileName.value, Type.valueOfConstant[Dir]) match
       case (Some(file), Some(dir)) =>
@@ -119,6 +125,7 @@ private[kentavro] object AvdlImpl:
           "expected string literals arguments"
         )
 
+  @experimental
   def fromFileOut[Dir <: Singleton & String: Type](fileName: Expr[String])(using
       Quotes
   ): Expr[KSchema[?]] =

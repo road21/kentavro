@@ -5,6 +5,7 @@ import scala.quoted.*
 import scala.util.{Failure, Success, Try}
 import org.apache.avro.Schema
 import kentavro.internal.MacroUtils
+import scala.annotation.experimental
 
 object Avsc:
   /**
@@ -27,6 +28,7 @@ object Avsc:
     * @param schema avsc schema (json) in string literal value
     * @return schema
     */
+  @experimental
   transparent inline def fromString(
       inline schema: String
   ): KSchema[?] =
@@ -46,12 +48,14 @@ object Avsc:
     * @return schema
     *
     */
+  @experimental
   transparent inline def fromFile(
       inline path: String
   ): KSchema[?] =
     ${ AvscImpl.fromFile('path) }
 
 private[kentavro] object AvscImpl:
+  @experimental
   def parseString(string: String)(using
       Quotes
   ): Expr[KSchema[?]] =
@@ -59,12 +63,13 @@ private[kentavro] object AvscImpl:
       new Schema.Parser().parse(string)
     ) match
       case Success(res) =>
-        MacroUtils.parseSchema(res)._2
+        MacroUtils.parseSchema(res)
       case Failure(ex) =>
         quotes.reflect.report.errorAndAbort(
           "Unable to parse schema: " + ex.getMessage()
         )
 
+  @experimental
   def fromFile(path: Expr[String])(using Quotes): Expr[KSchema[?]] =
     path.value match
       case Some(fileName) =>
@@ -77,6 +82,7 @@ private[kentavro] object AvscImpl:
           "expected string literal value (path to file)"
         )
 
+  @experimental
   def fromString(schema: Expr[String])(using Quotes): Expr[KSchema[?]] =
     schema.value match
       case Some(value) =>

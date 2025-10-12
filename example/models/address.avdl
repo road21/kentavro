@@ -1,9 +1,8 @@
-namespace com.example.avro;
+namespace com.example.kentavro;
 
 schema Address;
 
 record Address {
-    string street;
     string city;
     string zipCode;
 }
