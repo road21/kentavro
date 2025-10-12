@@ -29,32 +29,17 @@ private[kentavro] object MacroUtils:
       val inst: Expr[NamedCompanion[?, ?]]
   )
 
-  class Members[Q <: Quotes](using val q: Q)(
-      val decls: Map[String, CompanionDecl[q.type]] = Map.empty,
-  ):
-    def ++(other: Members[q.type]): Members[q.type] =
-      Members(decls ++ other.decls)
-
-    def +(name: String, decl: CompanionDecl[q.type]): Members[q.type] =
-      Members(decls + (name -> decl))
-
-    def allDecls(cls: q.reflect.Symbol): List[q.reflect.Symbol] =
-      (decls.values.map(_.decl)).map(x => x(cls)).toList
-
-  object Members:
-    def empty[Q <: Quotes](using q: Q): Members[Q] = new Members(Map.empty)
-
   class FieldsParsed[Q <: Quotes](using val q: Q)(
       val names: q.reflect.TypeRepr,
       val fieldTypes: q.reflect.TypeRepr,
       val inst: (cls: Quotes) ?=> Expr[RecordBuilder[?]],
-      val members: Members[q.type] = Members.empty
+      val members: Map[String, CompanionDecl[q.type]] = Map()
   )
 
   class AvroTypeParsed[Q <: Quotes](using val q: Q)(
       val typeArg: q.reflect.TypeRepr,
       val inst: (cls: Quotes) ?=> Expr[AvroType[?]],
-      val members: Members[q.type] = Members.empty
+      val members: Map[String, CompanionDecl[q.type]] = Map()
   )
 
   /**
@@ -106,7 +91,7 @@ private[kentavro] object MacroUtils:
           TypeRepr.of[EmptyTuple],
           TypeRepr.of[EmptyTuple],
           '{ RecordBuilder[NamedTuple.Empty](Nil) },
-          Members.empty
+          Map()
         )
 
   def unionOf(using
@@ -191,7 +176,7 @@ private[kentavro] object MacroUtils:
                       })
                     )
                   },
-                  parsed.map(_.members).foldLeft(Members.empty[quotes.type])(_ ++ _)
+                  parsed.map(_.members).foldLeft(Map.empty[String, CompanionDecl[quotes.type]])(_ ++ _)
                 )
               case _ =>
                 quotes.reflect.report.errorAndAbort("unexpected error")
@@ -228,7 +213,7 @@ private[kentavro] object MacroUtils:
             AvroTypeParsed[quotes.type](
               TypeRepr.of[schemaName ~ NamedTuple[names, types]],
               '{ ${ inst }.build[schemaName](${ schemaName }, ${ Expr(schema) }) },
-              parsed.members + (fullName, decl)
+              parsed.members + (fullName -> decl)
             )
           case _ =>
             quotes.reflect.report.errorAndAbort("unexpected error")
@@ -266,7 +251,7 @@ private[kentavro] object MacroUtils:
                       ValueOf(${ schemaName })
                     )
                   },
-                  Members(Map(fullName -> decl))
+                  Map(fullName -> decl)
                 )
               case _ => quotes.reflect.report.errorAndAbort("unexpected error")
           case _ =>
@@ -287,7 +272,7 @@ private[kentavro] object MacroUtils:
                   ValueOf(${ schemaName })
                 )
               },
-              Members.empty // TODO
+              Map() // TODO
             )
           case _ =>
             quotes.reflect.report.errorAndAbort("unexpected error")
@@ -312,7 +297,7 @@ private[kentavro] object MacroUtils:
           Symbol.spliceOwner,
           name,
           parents = parents.map(_.tpe),
-          cls => kSchemaOverride(cls) ++ parsed.members.allDecls(cls),
+          cls => kSchemaOverride(cls) ++ parsed.members.mapValues(v => v.decl(cls)).values,
           selfType = None
         )
 
@@ -327,7 +312,7 @@ private[kentavro] object MacroUtils:
         val valuesExpr = '{
           Map.from(
             ${
-              Expr.ofSeq(parsed.members.decls.map((key, inst) =>
+              Expr.ofSeq(parsed.members.map((key, inst) =>
                 val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
                 '{ ${ Expr(replaced) } -> ${ inst.inst } }
               ).toSeq)
@@ -336,7 +321,7 @@ private[kentavro] object MacroUtils:
         }
 
         val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
-        val valDefs      = tpeValDef :: valuesValDef :: parsed.members.decls.map { (name, decl) =>
+        val valDefs      = tpeValDef :: valuesValDef :: parsed.members.map { (name, decl) =>
           val method = cls.declaredField(name)
           ValDef(method, Some(decl.inst.asTerm))
         }.toList
