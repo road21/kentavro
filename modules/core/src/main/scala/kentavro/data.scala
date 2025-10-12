@@ -42,5 +42,5 @@ object NamedCompanion:
       Selectable:
     type Fields = NamedTuple[V, Tuple.Map[V, [x] =>> Name ~ x]]
 
-    inline def selectDynamic(fld: String): Any =
+    inline def selectDynamic(fld: String): Name ~ ? =
       Named(name, constValue[fld.type])

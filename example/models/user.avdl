@@ -1,3 +1,5 @@
+namespace com.example.kentavro;
+
 schema User;
 
 import idl "address.avdl";

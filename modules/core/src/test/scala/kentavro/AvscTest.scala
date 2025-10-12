@@ -6,7 +6,6 @@ import org.apache.avro.Schema
 import org.apache.avro.Schema.Type
 import kentavro.Utils.stripMarginCT
 import kentavro.BytesN
-import NamedTuple.withNames
 import scala.annotation.experimental
 
 @experimental

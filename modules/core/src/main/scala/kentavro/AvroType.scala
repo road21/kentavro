@@ -18,7 +18,6 @@ import org.apache.avro.specific.{SpecificData, SpecificDatumReader, SpecificDatu
 import org.apache.avro.io.{DatumReader, DatumWriter}
 import kentavro.AvroType.Tag.TaggedJValue
 import scala.collection.immutable.SeqMap
-import org.apache.avro.generic.GenericContainer
 
 /**
   * Representation of {@link apache.avro.Schema Schema} that keeps information about types on type-level.
@@ -218,7 +217,7 @@ object AvroType:
         errs.mkString(",")
       )
 
-  case class ArraySchema[T: ClassTag](
+  case class ArraySchema[T](
       override val schema: Schema,
       element: AvroType[T]
   ) extends AvroType[Vector[T]]:
@@ -309,6 +308,7 @@ object AvroType:
         val reader: DatumReader[AnyRef]                 = new SpecificDatumReader[AnyRef](schema)
         def readExternal(in: java.io.ObjectInput): Unit =
           reader.read(self, SpecificData.getDecoder(in))
+          ()
 
     override def deserializeFromJType(
         obj: GenericFixed

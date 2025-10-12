@@ -6,7 +6,6 @@ import org.apache.avro.Schema
 import org.apache.avro.Schema.Field
 import java.util.List as JavaList
 import scala.jdk.CollectionConverters.*
-import scala.reflect.ClassTag
 import kentavro.{AvroType, BytesN, KSchema}
 import scala.collection.immutable.ListSet
 import kentavro.~
@@ -154,18 +153,11 @@ private[kentavro] object MacroUtils:
         val sch            = parsedAvroType.inst
         repr.asType match
           case '[t] =>
-            val ct = Expr.summon[ClassTag[t]]
-            ct match
-              case Some(ctInst) =>
-                AvroTypeParsed(
-                  TypeRepr.of[Vector[t]],
-                  '{ AvroType.ArraySchema[t](${ Expr(schema) }, ${ sch }.asInstanceOf[AvroType[t]])(using $ctInst) },
-                  parsedAvroType.members
-                )
-              case None =>
-                quotes.reflect.report.errorAndAbort(
-                  s"no class tag found for ${repr.show}"
-                )
+            AvroTypeParsed(
+              TypeRepr.of[Vector[t]],
+                '{ AvroType.ArraySchema[t](${ Expr(schema) }, ${ sch }.asInstanceOf[AvroType[t]]) },
+                parsedAvroType.members
+              )
       case Schema.Type.MAP =>
         val valueSchema = schema.getValueType()
         val parsed      = parseAvroType(valueSchema)
@@ -343,11 +335,7 @@ private[kentavro] object MacroUtils:
           )
         }
 
-        val valuesValDef = {
-          given q2: Quotes = valuesVal.asQuotes
-          ValDef(valuesVal, Some(valuesExpr.asTerm))
-        }
-
+        val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
         val valDefs = tpeValDef :: valuesValDef :: parsed.members.decls.map { (name, decl) =>
           val method = cls.declaredField(name)
           ValDef(method, Some(decl.inst.asTerm))
