@@ -257,12 +257,28 @@ private[kentavro] object MacroUtils:
           case _ =>
             quotes.reflect.report.errorAndAbort("enums should contain at least one symbol")
       case Schema.Type.FIXED =>
-        val size = schema.getFixedSize()
-        (Expr(schema.getFullName()), Expr(size)) match
+        val size     = schema.getFixedSize()
+        val fullName = schema.getFullName()
+        (Expr(fullName), Expr(size)) match
           case (
                 '{ type schemaName <: String & scala.Singleton; $schemaName: schemaName },
                 '{ type s <: Int & scala.Singleton; $s: s }
               ) =>
+
+            val declInst: Expr[NamedCompanion[?, ?]] =
+              '{ new NamedCompanion.Fixed[schemaName, s](${ schemaName }) }
+
+            val decl = CompanionDecl[quotes.type](
+              cls =>
+                Symbol.newVal(
+                  cls,
+                  fullName,
+                  TypeRepr.of[NamedCompanion.Fixed[schemaName, s]],
+                  Flags.EmptyFlags,
+                  Symbol.noSymbol
+                ),
+              declInst
+            )
 
             AvroTypeParsed(
               TypeRepr.of[schemaName ~ BytesN[s]],
@@ -272,7 +288,7 @@ private[kentavro] object MacroUtils:
                   ValueOf(${ schemaName })
                 )
               },
-              Map() // TODO
+              Map(fullName -> decl)
             )
           case _ =>
             quotes.reflect.report.errorAndAbort("unexpected error")
@@ -297,7 +313,7 @@ private[kentavro] object MacroUtils:
           Symbol.spliceOwner,
           name,
           parents = parents.map(_.tpe),
-          cls => kSchemaOverride(cls) ++ parsed.members.mapValues(v => v.decl(cls)).values,
+          cls => kSchemaOverride(cls) ++ parsed.members.values.map(v => v.decl(cls)),
           selfType = None
         )
 

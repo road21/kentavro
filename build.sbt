@@ -5,7 +5,8 @@ ThisBuild / scalaVersion := "3.7.2"
 lazy val core = (project in file("modules/core"))
   .settings(
     scalacOptions ++= Seq(
-      "-Xcheck-macros"
+      "-Xcheck-macros",
+      "-deprecation"
     ),
     name := "kentavro-core",
     libraryDependencies ++= List(

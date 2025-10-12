@@ -44,3 +44,8 @@ object NamedCompanion:
 
     inline def selectDynamic(fld: String): Name ~ ? =
       Named(name, constValue[fld.type])
+
+  class Fixed[Name <: String & Singleton, N <: Int & Singleton](override val name: Name)
+    extends NamedCompanion[Name, BytesN[N]]:
+    def apply(bytes: BytesN[N]): Name ~ BytesN[N] =
+      Named.make(bytes)(using ValueOf(name))
