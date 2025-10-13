@@ -27,7 +27,8 @@ private[kentavro] object MacroUtils:
 
   class CompanionDecl[Q <: Quotes](using val q: Q)(
       val decl: (cls: q.reflect.Symbol) => q.reflect.Symbol,
-      val inst: (cls: Quotes) ?=> Expr[NamedCompanion[?, ?]]
+      val inst: (cls: Quotes) ?=> Expr[NamedCompanion[?, ?]],
+      val typeRepr: q.reflect.TypeRepr
   )
 
   class NamespaceDecl[Q <: Quotes](using val q: Q)(
@@ -234,7 +235,8 @@ private[kentavro] object MacroUtils:
                   Flags.EmptyFlags,
                   Symbol.noSymbol
                 ),
-              declInst
+              declInst,
+              TypeRepr.of[NamedCompanion.Record[schemaName, NamedTuple[names, types]]]
             )
 
             AvroTypeParsed[quotes.type](
@@ -269,7 +271,8 @@ private[kentavro] object MacroUtils:
                       Flags.EmptyFlags,
                       Symbol.noSymbol
                     ),
-                  declInst
+                  declInst,
+                  TypeRepr.of[NamedCompanion.Enum[schemaName, tup]]
                 )
 
                 AvroTypeParsed(
@@ -306,7 +309,8 @@ private[kentavro] object MacroUtils:
                   Flags.EmptyFlags,
                   Symbol.noSymbol
                 ),
-              declInst
+              declInst,
+              TypeRepr.of[NamedCompanion.Fixed[schemaName, s]]
             )
 
             AvroTypeParsed(
@@ -329,11 +333,20 @@ private[kentavro] object MacroUtils:
     import q.reflect.*
 
     members.ns.groupMapReduce(c => c.namespace)(x => List(x.name -> x.decl))(_ ++ _).map { (ns, companions) =>
+      val refinement = companions.foldLeft[TypeRepr](TypeRepr.of[Namespace]) {
+        case (repr, (name, comp)) =>
+          Refinement(
+            repr,
+            name,
+            comp.typeRepr
+          )
+      }
+
       val nsDecl: q.reflect.Symbol => q.reflect.Symbol = (cls: q.reflect.Symbol) =>
         Symbol.newVal(
           cls,
           ns,
-          TypeRepr.of[Namespace],
+          TypeRepr.of[Namespace] /*refinement*/,
           Flags.EmptyFlags,
           Symbol.noSymbol
         )
