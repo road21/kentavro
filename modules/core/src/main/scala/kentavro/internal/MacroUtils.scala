@@ -11,7 +11,7 @@ import scala.collection.immutable.ListSet
 import kentavro.~
 import kentavro.AvroType.{ArraySchema, MapSchema, NamedSchema, Primitive, Tag, UnionSchema}
 import scala.collection.immutable.ListMap
-import kentavro.NamedCompanion
+import kentavro.{NamedCompanion, Namespace}
 import scala.annotation.experimental
 
 private[kentavro] object MacroUtils:
@@ -29,17 +29,37 @@ private[kentavro] object MacroUtils:
       val inst: Expr[NamedCompanion[?, ?]]
   )
 
+  class Companions[Q <: Quotes](using val q: Q)(
+      val ns: List[(namespace: String, name: String, decl: CompanionDecl[q.type])],
+      val root: List[(name: String, decl: CompanionDecl[q.type])]
+  ):
+    def ++(other: Companions[q.type]): Companions[q.type] =
+      Companions(
+        ns ++ other.ns,
+        root ++ other.root
+      )
+
+    def +(namespace: Option[String], name: String, decl: CompanionDecl[q.type]): Companions[q.type] =
+      namespace match
+        case Some(nsName) =>
+          Companions((nsName, name, decl) :: ns, root)
+        case None =>
+          Companions(ns, (name, decl) :: root)
+
+  object Companions:
+    def empty[Q <: Quotes](using q: Q): Companions[q.type] = Companions(Nil, Nil)
+
   class FieldsParsed[Q <: Quotes](using val q: Q)(
       val names: q.reflect.TypeRepr,
       val fieldTypes: q.reflect.TypeRepr,
       val inst: (cls: Quotes) ?=> Expr[RecordBuilder[?]],
-      val members: Map[String, CompanionDecl[q.type]] = Map()
+      val members: Companions[q.type] = Companions.empty
   )
 
   class AvroTypeParsed[Q <: Quotes](using val q: Q)(
       val typeArg: q.reflect.TypeRepr,
       val inst: (cls: Quotes) ?=> Expr[AvroType[?]],
-      val members: Map[String, CompanionDecl[q.type]] = Map()
+      val members: Companions[q.type] = Companions.empty
   )
 
   /**
@@ -90,8 +110,7 @@ private[kentavro] object MacroUtils:
         FieldsParsed(
           TypeRepr.of[EmptyTuple],
           TypeRepr.of[EmptyTuple],
-          '{ RecordBuilder[NamedTuple.Empty](Nil) },
-          Map()
+          '{ RecordBuilder[NamedTuple.Empty](Nil) }
         )
 
   def unionOf(using
@@ -176,7 +195,7 @@ private[kentavro] object MacroUtils:
                       })
                     )
                   },
-                  parsed.map(_.members).foldLeft(Map.empty[String, CompanionDecl[quotes.type]])(_ ++ _)
+                  parsed.map(_.members).foldLeft(Companions.empty)((x, y) => x ++ y)
                 )
               case _ =>
                 quotes.reflect.report.errorAndAbort("unexpected error")
@@ -191,6 +210,7 @@ private[kentavro] object MacroUtils:
         val inst                              = parsed.inst
 
         val fullName = schema.getFullName()
+        val name     = schema.getName()
         (Expr(fullName), namesRepr.asType, typesRepr.asType) match
           case (
                 '{ type schemaName <: String & scala.Singleton; $schemaName: schemaName },
@@ -203,17 +223,18 @@ private[kentavro] object MacroUtils:
               cls =>
                 Symbol.newVal(
                   cls,
-                  fullName,
+                  name,
                   TypeRepr.of[NamedCompanion.Record[schemaName, NamedTuple[names, types]]],
                   Flags.EmptyFlags,
                   Symbol.noSymbol
                 ),
               declInst
             )
+
             AvroTypeParsed[quotes.type](
               TypeRepr.of[schemaName ~ NamedTuple[names, types]],
               '{ ${ inst }.build[schemaName](${ schemaName }, ${ Expr(schema) }) },
-              parsed.members + (fullName -> decl)
+              parsed.members + (Option(schema.getNamespace()), name, decl)
             )
           case _ =>
             quotes.reflect.report.errorAndAbort("unexpected error")
@@ -222,6 +243,7 @@ private[kentavro] object MacroUtils:
         symbols match
           case h :: t =>
             val (typ, tup) = makeUnionTypeOfLiterals(h, t)
+            val name       = schema.getName()
             val fullName   = schema.getFullName()
             (Expr(fullName), typ.asType, tup.asType) match
               case (
@@ -236,7 +258,7 @@ private[kentavro] object MacroUtils:
                   cls =>
                     Symbol.newVal(
                       cls,
-                      fullName,
+                      name,
                       TypeRepr.of[NamedCompanion.Enum[schemaName, tup]],
                       Flags.EmptyFlags,
                       Symbol.noSymbol
@@ -251,13 +273,14 @@ private[kentavro] object MacroUtils:
                       ValueOf(${ schemaName })
                     )
                   },
-                  Map(fullName -> decl)
+                  Companions.empty + (Option(schema.getNamespace()), name, decl)
                 )
               case _ => quotes.reflect.report.errorAndAbort("unexpected error")
           case _ =>
             quotes.reflect.report.errorAndAbort("enums should contain at least one symbol")
       case Schema.Type.FIXED =>
         val size     = schema.getFixedSize()
+        val name     = schema.getName()
         val fullName = schema.getFullName()
         (Expr(fullName), Expr(size)) match
           case (
@@ -272,7 +295,7 @@ private[kentavro] object MacroUtils:
               cls =>
                 Symbol.newVal(
                   cls,
-                  fullName,
+                  name,
                   TypeRepr.of[NamedCompanion.Fixed[schemaName, s]],
                   Flags.EmptyFlags,
                   Symbol.noSymbol
@@ -288,10 +311,69 @@ private[kentavro] object MacroUtils:
                   ValueOf(${ schemaName })
                 )
               },
-              Map(fullName -> decl)
+              Companions.empty + (Option(schema.getNamespace()), name, decl)
             )
           case _ =>
             quotes.reflect.report.errorAndAbort("unexpected error")
+
+  def buildNamespacesDecl(using
+      q: Quotes
+  )(members: Companions[q.type]): Map[String, (inst: Expr[Namespace], decl: (cls: q.reflect.Symbol) => Symbol)] = {
+    import q.reflect.*
+    members.ns.groupMapReduce(c => c.namespace)(x => List(x.name -> x.decl))(_ ++ _).map { (ns, companions) =>
+      val name    = Symbol.freshName(ns)
+      val parents = List(TypeTree.of[Object], TypeTree.of[Namespace])
+
+      val cls = Symbol.newClass(
+        Symbol.spliceOwner,
+        name,
+        parents = parents.map(_.tpe),
+        cls =>
+          Symbol.newVal(
+            cls,
+            "values",
+            TypeRepr.of[Map[String, Any]],
+            Flags.Override,
+            Symbol.noSymbol
+          ) :: companions.map(d => d._2.decl(cls)),
+        selfType = None
+      )
+
+      val valuesVal = cls.declaredField("values")
+
+      val valuesExpr = '{
+        Map.from(
+          ${
+            Expr.ofSeq(companions.map((key, comp) =>
+              val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
+              '{ ${ Expr(replaced) } -> ${ comp.inst } }
+            ).toSeq)
+          }
+        )
+      }
+
+      val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
+      val valDefs      = valuesValDef :: companions.map { (name, decl) =>
+        val method = cls.declaredField(name)
+        ValDef(method, Some(decl.inst.asTerm))
+      }.toList
+
+      val clsDef = ClassDef(cls, parents, body = valDefs)
+      val newCls = Apply(Select(New(TypeIdent(cls)), cls.primaryConstructor), Nil)
+      val nsInst = Block(List(clsDef), newCls).asExprOf[Namespace]
+
+      val nsDecl = cls =>
+        Symbol.newVal(
+          cls,
+          ns,
+          TypeRepr.of[Namespace],
+          Flags.EmptyFlags,
+          Symbol.noSymbol
+        )
+
+      ???
+    }
+  }
 
   @experimental
   def parseSchema(schema: Schema)(using Quotes): Expr[KSchema[?]] =
@@ -313,7 +395,7 @@ private[kentavro] object MacroUtils:
           Symbol.spliceOwner,
           name,
           parents = parents.map(_.tpe),
-          cls => kSchemaOverride(cls) ++ parsed.members.values.map(v => v.decl(cls)),
+          cls => kSchemaOverride(cls) ++ parsed.members.map(_.decl(cls)),
           selfType = None
         )
 

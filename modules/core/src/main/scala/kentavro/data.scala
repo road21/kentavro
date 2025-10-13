@@ -49,3 +49,7 @@ object NamedCompanion:
     extends NamedCompanion[Name, BytesN[N]]:
     def apply(bytes: BytesN[N]): Name ~ BytesN[N] =
       Named.make(bytes)(using ValueOf(name))
+
+trait Namespace extends Selectable:
+  def values: Map[String, Any]
+  def selectDynamic(str: String): Any = values(str)
