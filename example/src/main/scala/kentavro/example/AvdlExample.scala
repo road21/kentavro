@@ -11,25 +11,24 @@ import scala.annotation.experimental
       .withImports(BuildInfo.rootDir + "/models")
       .fromFileIn("user.avdl")
 
-  println("")
-  // val ns = s.`com.example.kentavro`
-  // val bytes = s.serialize(
-  //   ns.User(
-  //     "John",
-  //     1,
-  //     "@email",
-  //     42,
-  //     ns.Address("city", "768"),
-  //     ns.Status.SUSPENDED
-  //   )
-  // )
+  val ns    = s.`com.example.kentavro`
+  val bytes = s.serialize(
+    ns.User(
+      "John",
+      1,
+      "@email",
+      42,
+      ns.Address("city", "768"),
+      ns.Status.SUSPENDED
+    )
+  )
 
-  // println(
-  //   s.deserialize(bytes).map { x =>
-  //     x.value.status.value match
-  //       case ns.Status.ACTIVE.value    => "act"
-  //       case ns.Status.SUSPENDED.value => "sus"
-  //       case ns.Status.PENDING.value   => "pend"
-  //       case ns.Status.INACTIVE.value  => "sd"
-  //   }
-  // )
+  println(
+    s.deserialize(bytes).map { x =>
+      x.value.status.value match
+        case ns.Status.ACTIVE.value    => "act"
+        case ns.Status.SUSPENDED.value => "sus"
+        case ns.Status.PENDING.value   => "pend"
+        case ns.Status.INACTIVE.value  => "sd"
+    }
+  )

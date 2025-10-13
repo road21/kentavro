@@ -346,7 +346,7 @@ private[kentavro] object MacroUtils:
         Symbol.newVal(
           cls,
           ns,
-          TypeRepr.of[Namespace] /*refinement*/,
+          refinement,
           Flags.EmptyFlags,
           Symbol.noSymbol
         )
@@ -426,7 +426,10 @@ private[kentavro] object MacroUtils:
         )
 
         val tpeVal    = cls.declaredField("avroType")
-        val tpeValDef = ValDef(tpeVal, Some(parsed.inst.asTerm))
+        val tpeValDef = {
+          given Quotes = tpeVal.asQuotes
+          ValDef(tpeVal, Some(parsed.inst.asTerm))
+        }
 
         val valuesVal  = cls.declaredField("values")
         val valuesExpr = '{
