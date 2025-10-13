@@ -32,7 +32,7 @@ private[kentavro] object MacroUtils:
 
   class NamespaceDecl[Q <: Quotes](using val q: Q)(
       val decl: (cls: q.reflect.Symbol) => q.reflect.Symbol,
-      val inst: (cls: Quotes) ?=> Expr[Namespace]
+      val inst: (cls: q.reflect.Symbol) => Expr[Namespace]
   )
 
   class Companions[Q <: Quotes](using val q: Q)(
@@ -326,10 +326,19 @@ private[kentavro] object MacroUtils:
   def buildNamespacesDecl(using
       q: Quotes
   )(members: Companions[q.type]): Map[String, NamespaceDecl[q.type]] = {
-    members.ns.groupMapReduce(c => c.namespace)(x => List(x.name -> x.decl))(_ ++ _).map { (ns, companions) =>
-      val res = {
-        import q.reflect.*
+    import q.reflect.*
 
+    members.ns.groupMapReduce(c => c.namespace)(x => List(x.name -> x.decl))(_ ++ _).map { (ns, companions) =>
+      val nsDecl: q.reflect.Symbol => q.reflect.Symbol = (cls: q.reflect.Symbol) =>
+        Symbol.newVal(
+          cls,
+          ns,
+          TypeRepr.of[Namespace],
+          Flags.EmptyFlags,
+          Symbol.noSymbol
+        )
+
+      val nsInst = (symb: Symbol) => {
         val name    = Symbol.freshName(ns)
         val parents = List(TypeTree.of[Object], TypeTree.of[Namespace])
 
@@ -361,29 +370,19 @@ private[kentavro] object MacroUtils:
           )
         }
 
-        val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
+        val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm.changeOwner(symb)))
         val valDefs      = valuesValDef :: companions.map { (name, decl) =>
           val method = cls.declaredField(name)
-          ValDef(method, Some(decl.inst.asTerm))
+          ValDef(method, Some(decl.inst.asTerm.changeOwner(symb)))
         }.toList
 
         val clsDef = ClassDef(cls, parents, body = valDefs)
         val newCls = Apply(Select(New(TypeIdent(cls)), cls.primaryConstructor), Nil)
-        val nsInst = Block(List(clsDef), newCls).asExprOf[Namespace]
 
-        val nsDecl: q.reflect.Symbol => q.reflect.Symbol = (cls: q.reflect.Symbol) =>
-          Symbol.newVal(
-            cls,
-            ns,
-            TypeRepr.of[Namespace],
-            Flags.EmptyFlags,
-            Symbol.noSymbol
-          )
-
-        NamespaceDecl[q.type](nsDecl, nsInst)
+        Block(List(clsDef), newCls).changeOwner(symb).asExprOf[Namespace]
       }
 
-      ns -> res
+      ns -> NamespaceDecl[q.type](nsDecl, nsInst)
     }
   }
 
@@ -392,6 +391,7 @@ private[kentavro] object MacroUtils:
     import quotes.reflect.*
     val parsed       = parseAvroType(schema)
     val nsDecl       = buildNamespacesDecl(parsed.members)
+    val rootDecl     = parsed.members.root
     val name: String = "Impl"
 
     parsed.typeArg.asType match
@@ -408,34 +408,33 @@ private[kentavro] object MacroUtils:
           Symbol.spliceOwner,
           name,
           parents = parents.map(_.tpe),
-          cls => kSchemaOverride(cls) ++ nsDecl.values.map(_.decl(cls)),
+          cls => kSchemaOverride(cls) ++ nsDecl.values.map(_.decl(cls)) ++ rootDecl.map(r => r.decl.decl(cls)),
           selfType = None
         )
 
         val tpeVal    = cls.declaredField("avroType")
-        val tpeValDef = {
-          given q2: Quotes = tpeVal.asQuotes
-          ValDef(tpeVal, Some(parsed.inst.asTerm))
-        }
+        val tpeValDef = ValDef(tpeVal, Some(parsed.inst.asTerm))
 
-        val valuesVal = cls.declaredField("values")
-
+        val valuesVal  = cls.declaredField("values")
         val valuesExpr = '{
           Map.from(
             ${
               Expr.ofSeq(nsDecl.map((key, inst) =>
                 val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
-                '{ ${ Expr(replaced) } -> ${ inst.inst } }
+                '{ ${ Expr(replaced) } -> ${ inst.inst(valuesVal) } }
               ).toSeq)
             }
           )
         }
-
         val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
-        val valDefs      = tpeValDef :: valuesValDef :: nsDecl.map { (name, decl) =>
+
+        val valDefs = tpeValDef :: valuesValDef :: nsDecl.map { (name, decl) =>
+          val method = cls.declaredField(name)
+          ValDef(method, Some(decl.inst(cls).asTerm))
+        }.toList ++ rootDecl.map { case (name, decl) =>
           val method = cls.declaredField(name)
           ValDef(method, Some(decl.inst.asTerm))
-        }.toList
+        }
 
         val clsDef = ClassDef(cls, parents, body = valDefs)
         val newCls = Apply(Select(New(TypeIdent(cls)), cls.primaryConstructor), Nil)
