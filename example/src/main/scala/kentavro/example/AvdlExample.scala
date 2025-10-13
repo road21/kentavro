@@ -11,24 +11,24 @@ import scala.annotation.experimental
       .withImports(BuildInfo.rootDir + "/models")
       .fromFileIn("user.avdl")
 
+  val ns    = s.`com.example.kentavro`
   val bytes = s.serialize(
-    s.`com.example.kentavro.User`(
+    s.User(
       "John",
       1,
       "@email",
       42,
-      s.`com.example.kentavro.Address`("city", "768"),
-      s.`com.example.kentavro.Status`.SUSPENDED
+      ns.Address("city", "768"),
+      s.Status.SUSPENDED
     )
   )
 
   println(
     s.deserialize(bytes).map { x =>
-      val st = s.`com.example.kentavro.Status`
       x.value.status.value match
-        case st.ACTIVE.value    => "act"
-        case st.SUSPENDED.value => "sus"
-        case st.PENDING.value   => "pend"
-        case st.INACTIVE.value  => "sd"
+        case s.Status.ACTIVE.value    => "act"
+        case s.Status.SUSPENDED.value => "sus"
+        case s.Status.PENDING.value   => "pend"
+        case s.Status.INACTIVE.value  => "sd"
     }
   )

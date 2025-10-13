@@ -11,8 +11,9 @@ import scala.collection.immutable.ListSet
 import kentavro.~
 import kentavro.AvroType.{ArraySchema, MapSchema, NamedSchema, Primitive, Tag, UnionSchema}
 import scala.collection.immutable.ListMap
-import kentavro.NamedCompanion
+import kentavro.{NamedCompanion, Namespace}
 import scala.annotation.experimental
+import com.fasterxml.jackson.core.sym.Name
 
 private[kentavro] object MacroUtils:
   /**
@@ -26,20 +27,46 @@ private[kentavro] object MacroUtils:
 
   class CompanionDecl[Q <: Quotes](using val q: Q)(
       val decl: (cls: q.reflect.Symbol) => q.reflect.Symbol,
-      val inst: Expr[NamedCompanion[?, ?]]
+      val inst: (cls: Quotes) ?=> Expr[NamedCompanion[?, ?]],
+      val typeRepr: q.reflect.TypeRepr
   )
+
+  class NamespaceDecl[Q <: Quotes](using val q: Q)(
+      val decl: (cls: q.reflect.Symbol) => q.reflect.Symbol,
+      val inst: (cls: q.reflect.Symbol) => Expr[Namespace]
+  )
+
+  class Companions[Q <: Quotes](using val q: Q)(
+      val ns: List[(namespace: String, name: String, decl: CompanionDecl[q.type])],
+      val root: List[(name: String, decl: CompanionDecl[q.type])]
+  ):
+    def ++(other: Companions[q.type]): Companions[q.type] =
+      Companions(
+        ns ++ other.ns,
+        root ++ other.root
+      )
+
+    def +(namespace: Option[String], name: String, decl: CompanionDecl[q.type]): Companions[q.type] =
+      namespace match
+        case Some(nsName) =>
+          Companions((nsName, name, decl) :: ns, root)
+        case None =>
+          Companions(ns, (name, decl) :: root)
+
+  object Companions:
+    def empty[Q <: Quotes](using q: Q): Companions[q.type] = Companions(Nil, Nil)
 
   class FieldsParsed[Q <: Quotes](using val q: Q)(
       val names: q.reflect.TypeRepr,
       val fieldTypes: q.reflect.TypeRepr,
       val inst: (cls: Quotes) ?=> Expr[RecordBuilder[?]],
-      val members: Map[String, CompanionDecl[q.type]] = Map()
+      val members: Companions[q.type] = Companions.empty
   )
 
   class AvroTypeParsed[Q <: Quotes](using val q: Q)(
       val typeArg: q.reflect.TypeRepr,
       val inst: (cls: Quotes) ?=> Expr[AvroType[?]],
-      val members: Map[String, CompanionDecl[q.type]] = Map()
+      val members: Companions[q.type] = Companions.empty
   )
 
   /**
@@ -90,8 +117,7 @@ private[kentavro] object MacroUtils:
         FieldsParsed(
           TypeRepr.of[EmptyTuple],
           TypeRepr.of[EmptyTuple],
-          '{ RecordBuilder[NamedTuple.Empty](Nil) },
-          Map()
+          '{ RecordBuilder[NamedTuple.Empty](Nil) }
         )
 
   def unionOf(using
@@ -176,7 +202,7 @@ private[kentavro] object MacroUtils:
                       })
                     )
                   },
-                  parsed.map(_.members).foldLeft(Map.empty[String, CompanionDecl[quotes.type]])(_ ++ _)
+                  parsed.map(_.members).foldLeft(Companions.empty)((x, y) => x ++ y)
                 )
               case _ =>
                 quotes.reflect.report.errorAndAbort("unexpected error")
@@ -191,6 +217,7 @@ private[kentavro] object MacroUtils:
         val inst                              = parsed.inst
 
         val fullName = schema.getFullName()
+        val name     = schema.getName()
         (Expr(fullName), namesRepr.asType, typesRepr.asType) match
           case (
                 '{ type schemaName <: String & scala.Singleton; $schemaName: schemaName },
@@ -203,17 +230,19 @@ private[kentavro] object MacroUtils:
               cls =>
                 Symbol.newVal(
                   cls,
-                  fullName,
+                  name,
                   TypeRepr.of[NamedCompanion.Record[schemaName, NamedTuple[names, types]]],
                   Flags.EmptyFlags,
                   Symbol.noSymbol
                 ),
-              declInst
+              declInst,
+              TypeRepr.of[NamedCompanion.Record[schemaName, NamedTuple[names, types]]]
             )
+
             AvroTypeParsed[quotes.type](
               TypeRepr.of[schemaName ~ NamedTuple[names, types]],
               '{ ${ inst }.build[schemaName](${ schemaName }, ${ Expr(schema) }) },
-              parsed.members + (fullName -> decl)
+              parsed.members + (Option(schema.getNamespace()), name, decl)
             )
           case _ =>
             quotes.reflect.report.errorAndAbort("unexpected error")
@@ -222,6 +251,7 @@ private[kentavro] object MacroUtils:
         symbols match
           case h :: t =>
             val (typ, tup) = makeUnionTypeOfLiterals(h, t)
+            val name       = schema.getName()
             val fullName   = schema.getFullName()
             (Expr(fullName), typ.asType, tup.asType) match
               case (
@@ -236,12 +266,13 @@ private[kentavro] object MacroUtils:
                   cls =>
                     Symbol.newVal(
                       cls,
-                      fullName,
+                      name,
                       TypeRepr.of[NamedCompanion.Enum[schemaName, tup]],
                       Flags.EmptyFlags,
                       Symbol.noSymbol
                     ),
-                  declInst
+                  declInst,
+                  TypeRepr.of[NamedCompanion.Enum[schemaName, tup]]
                 )
 
                 AvroTypeParsed(
@@ -251,13 +282,14 @@ private[kentavro] object MacroUtils:
                       ValueOf(${ schemaName })
                     )
                   },
-                  Map(fullName -> decl)
+                  Companions.empty + (Option(schema.getNamespace()), name, decl)
                 )
               case _ => quotes.reflect.report.errorAndAbort("unexpected error")
           case _ =>
             quotes.reflect.report.errorAndAbort("enums should contain at least one symbol")
       case Schema.Type.FIXED =>
         val size     = schema.getFixedSize()
+        val name     = schema.getName()
         val fullName = schema.getFullName()
         (Expr(fullName), Expr(size)) match
           case (
@@ -272,12 +304,13 @@ private[kentavro] object MacroUtils:
               cls =>
                 Symbol.newVal(
                   cls,
-                  fullName,
+                  name,
                   TypeRepr.of[NamedCompanion.Fixed[schemaName, s]],
                   Flags.EmptyFlags,
                   Symbol.noSymbol
                 ),
-              declInst
+              declInst,
+              TypeRepr.of[NamedCompanion.Fixed[schemaName, s]]
             )
 
             AvroTypeParsed(
@@ -288,15 +321,90 @@ private[kentavro] object MacroUtils:
                   ValueOf(${ schemaName })
                 )
               },
-              Map(fullName -> decl)
+              Companions.empty + (Option(schema.getNamespace()), name, decl)
             )
           case _ =>
             quotes.reflect.report.errorAndAbort("unexpected error")
 
   @experimental
+  def buildNamespacesDecl(using
+      q: Quotes
+  )(members: Companions[q.type]): Map[String, NamespaceDecl[q.type]] = {
+    import q.reflect.*
+
+    members.ns.groupMapReduce(c => c.namespace)(x => List(x.name -> x.decl))(_ ++ _).map { (ns, companions) =>
+      val refinement = companions.foldLeft[TypeRepr](TypeRepr.of[Namespace]) {
+        case (repr, (name, comp)) =>
+          Refinement(
+            repr,
+            name,
+            comp.typeRepr
+          )
+      }
+
+      val nsDecl: q.reflect.Symbol => q.reflect.Symbol = (cls: q.reflect.Symbol) =>
+        Symbol.newVal(
+          cls,
+          ns,
+          refinement,
+          Flags.EmptyFlags,
+          Symbol.noSymbol
+        )
+
+      val nsInst = (owner: Symbol) => {
+        val name    = Symbol.freshName(ns)
+        val parents = List(TypeTree.of[Object], TypeTree.of[Namespace])
+
+        val cls = Symbol.newClass(
+          owner,
+          name,
+          parents = parents.map(_.tpe),
+          cls =>
+            Symbol.newVal(
+              cls,
+              "values",
+              TypeRepr.of[Map[String, Any]],
+              Flags.Override,
+              Symbol.noSymbol
+            ) :: companions.map(d => d._2.decl(cls)),
+          selfType = None
+        )
+
+        val valuesVal = cls.declaredField("values")
+
+        val valuesExpr = '{
+          Map.from(
+            ${
+              Expr.ofSeq(companions.map((key, comp) =>
+                val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
+                '{ ${ Expr(replaced) } -> ${ comp.inst } }
+              ).toSeq)
+            }
+          )
+        }
+
+        val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
+        val valDefs      = valuesValDef :: companions.map { (name, decl) =>
+          val method = cls.declaredField(name)
+          ValDef(method, None)
+        }.toList
+
+        val clsDef = ClassDef(cls, parents, body = valDefs)
+        val newCls = Apply(Select(New(TypeIdent(cls)), cls.primaryConstructor), Nil)
+
+        Block(List(clsDef), newCls).asExprOf[Namespace]
+      }
+
+      ns -> NamespaceDecl[q.type](nsDecl, nsInst)
+    }
+  }
+
+  @experimental
   def parseSchema(schema: Schema)(using Quotes): Expr[KSchema[?]] =
     import quotes.reflect.*
     val parsed       = parseAvroType(schema)
+    val nsDecl       = buildNamespacesDecl(parsed.members)
+    val rootDecl     = parsed.members.root
     val name: String = "Impl"
 
     parsed.typeArg.asType match
@@ -313,34 +421,35 @@ private[kentavro] object MacroUtils:
           Symbol.spliceOwner,
           name,
           parents = parents.map(_.tpe),
-          cls => kSchemaOverride(cls) ++ parsed.members.values.map(v => v.decl(cls)),
+          cls => kSchemaOverride(cls) ++ nsDecl.values.map(_.decl(cls)) ++ rootDecl.map(r => r.decl.decl(cls)),
           selfType = None
         )
 
         val tpeVal    = cls.declaredField("avroType")
         val tpeValDef = {
-          given q2: Quotes = tpeVal.asQuotes
+          given Quotes = tpeVal.asQuotes
           ValDef(tpeVal, Some(parsed.inst.asTerm))
         }
 
-        val valuesVal = cls.declaredField("values")
-
-        val valuesExpr = '{
-          Map.from(
-            ${
-              Expr.ofSeq(parsed.members.map((key, inst) =>
-                val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
-                '{ ${ Expr(replaced) } -> ${ inst.inst } }
-              ).toSeq)
-            }
-          )
+        val valuesVal  = cls.declaredField("values")
+        val rootValues = rootDecl.map { case (key, inst) =>
+          val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
+          '{ ${ Expr(replaced) } -> ${ inst.inst } }: Expr[(String, Any)]
         }
+        val declValues = nsDecl.map((key, inst) =>
+          val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
+          '{ ${ Expr(replaced) } -> ${ inst.inst(valuesVal) } }: Expr[(String, Any)]
+        )
+        val valuesExpr   = '{ Map.from(${ Expr.ofSeq(rootValues ++ declValues) }) }
+        val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm.changeOwner(valuesVal)))
 
-        val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
-        val valDefs      = tpeValDef :: valuesValDef :: parsed.members.map { (name, decl) =>
+        val valDefs = tpeValDef :: valuesValDef :: nsDecl.map { (name, decl) =>
           val method = cls.declaredField(name)
-          ValDef(method, Some(decl.inst.asTerm))
-        }.toList
+          ValDef(method, None)
+        }.toList ++ rootDecl.map { case (name, decl) =>
+          val method = cls.declaredField(name)
+          ValDef(method, None)
+        }
 
         val clsDef = ClassDef(cls, parents, body = valDefs)
         val newCls = Apply(Select(New(TypeIdent(cls)), cls.primaryConstructor), Nil)
