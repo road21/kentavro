@@ -351,12 +351,12 @@ private[kentavro] object MacroUtils:
           Symbol.noSymbol
         )
 
-      val nsInst = (symb: Symbol) => {
+      val nsInst = (owner: Symbol) => {
         val name    = Symbol.freshName(ns)
         val parents = List(TypeTree.of[Object], TypeTree.of[Namespace])
 
         val cls = Symbol.newClass(
-          Symbol.spliceOwner,
+          owner,
           name,
           parents = parents.map(_.tpe),
           cls =>
@@ -383,16 +383,16 @@ private[kentavro] object MacroUtils:
           )
         }
 
-        val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm.changeOwner(symb)))
+        val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
         val valDefs      = valuesValDef :: companions.map { (name, decl) =>
           val method = cls.declaredField(name)
-          ValDef(method, Some(decl.inst.asTerm.changeOwner(symb)))
+          ValDef(method, None)
         }.toList
 
         val clsDef = ClassDef(cls, parents, body = valDefs)
         val newCls = Apply(Select(New(TypeIdent(cls)), cls.primaryConstructor), Nil)
 
-        Block(List(clsDef), newCls).changeOwner(symb).asExprOf[Namespace]
+        Block(List(clsDef), newCls).asExprOf[Namespace]
       }
 
       ns -> NamespaceDecl[q.type](nsDecl, nsInst)
@@ -441,14 +441,14 @@ private[kentavro] object MacroUtils:
           '{ ${ Expr(replaced) } -> ${ inst.inst(valuesVal) } }: Expr[(String, Any)]
         )
         val valuesExpr   = '{ Map.from(${ Expr.ofSeq(rootValues ++ declValues) }) }
-        val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
+        val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm.changeOwner(valuesVal)))
 
         val valDefs = tpeValDef :: valuesValDef :: nsDecl.map { (name, decl) =>
           val method = cls.declaredField(name)
-          ValDef(method, Some(decl.inst(cls).asTerm))
+          ValDef(method, None)
         }.toList ++ rootDecl.map { case (name, decl) =>
           val method = cls.declaredField(name)
-          ValDef(method, Some(decl.inst.asTerm))
+          ValDef(method, None)
         }
 
         val clsDef = ClassDef(cls, parents, body = valDefs)
