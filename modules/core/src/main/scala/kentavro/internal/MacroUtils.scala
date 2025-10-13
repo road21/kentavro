@@ -13,6 +13,7 @@ import kentavro.AvroType.{ArraySchema, MapSchema, NamedSchema, Primitive, Tag, U
 import scala.collection.immutable.ListMap
 import kentavro.{NamedCompanion, Namespace}
 import scala.annotation.experimental
+import com.fasterxml.jackson.core.sym.Name
 
 private[kentavro] object MacroUtils:
   /**
@@ -26,7 +27,12 @@ private[kentavro] object MacroUtils:
 
   class CompanionDecl[Q <: Quotes](using val q: Q)(
       val decl: (cls: q.reflect.Symbol) => q.reflect.Symbol,
-      val inst: Expr[NamedCompanion[?, ?]]
+      val inst: (cls: Quotes) ?=> Expr[NamedCompanion[?, ?]]
+  )
+
+  class NamespaceDecl[Q <: Quotes](using val q: Q)(
+      val decl: (cls: q.reflect.Symbol) => q.reflect.Symbol,
+      val inst: (cls: Quotes) ?=> Expr[Namespace]
   )
 
   class Companions[Q <: Quotes](using val q: Q)(
@@ -316,62 +322,68 @@ private[kentavro] object MacroUtils:
           case _ =>
             quotes.reflect.report.errorAndAbort("unexpected error")
 
+  @experimental
   def buildNamespacesDecl(using
       q: Quotes
-  )(members: Companions[q.type]): Map[String, (inst: Expr[Namespace], decl: (cls: q.reflect.Symbol) => Symbol)] = {
-    import q.reflect.*
+  )(members: Companions[q.type]): Map[String, NamespaceDecl[q.type]] = {
     members.ns.groupMapReduce(c => c.namespace)(x => List(x.name -> x.decl))(_ ++ _).map { (ns, companions) =>
-      val name    = Symbol.freshName(ns)
-      val parents = List(TypeTree.of[Object], TypeTree.of[Namespace])
+      val res = {
+        import q.reflect.*
 
-      val cls = Symbol.newClass(
-        Symbol.spliceOwner,
-        name,
-        parents = parents.map(_.tpe),
-        cls =>
+        val name    = Symbol.freshName(ns)
+        val parents = List(TypeTree.of[Object], TypeTree.of[Namespace])
+
+        val cls = Symbol.newClass(
+          Symbol.spliceOwner,
+          name,
+          parents = parents.map(_.tpe),
+          cls =>
+            Symbol.newVal(
+              cls,
+              "values",
+              TypeRepr.of[Map[String, Any]],
+              Flags.Override,
+              Symbol.noSymbol
+            ) :: companions.map(d => d._2.decl(cls)),
+          selfType = None
+        )
+
+        val valuesVal = cls.declaredField("values")
+
+        val valuesExpr = '{
+          Map.from(
+            ${
+              Expr.ofSeq(companions.map((key, comp) =>
+                val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
+                '{ ${ Expr(replaced) } -> ${ comp.inst } }
+              ).toSeq)
+            }
+          )
+        }
+
+        val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
+        val valDefs      = valuesValDef :: companions.map { (name, decl) =>
+          val method = cls.declaredField(name)
+          ValDef(method, Some(decl.inst.asTerm))
+        }.toList
+
+        val clsDef = ClassDef(cls, parents, body = valDefs)
+        val newCls = Apply(Select(New(TypeIdent(cls)), cls.primaryConstructor), Nil)
+        val nsInst = Block(List(clsDef), newCls).asExprOf[Namespace]
+
+        val nsDecl: q.reflect.Symbol => q.reflect.Symbol = (cls: q.reflect.Symbol) =>
           Symbol.newVal(
             cls,
-            "values",
-            TypeRepr.of[Map[String, Any]],
-            Flags.Override,
+            ns,
+            TypeRepr.of[Namespace],
+            Flags.EmptyFlags,
             Symbol.noSymbol
-          ) :: companions.map(d => d._2.decl(cls)),
-        selfType = None
-      )
+          )
 
-      val valuesVal = cls.declaredField("values")
-
-      val valuesExpr = '{
-        Map.from(
-          ${
-            Expr.ofSeq(companions.map((key, comp) =>
-              val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
-              '{ ${ Expr(replaced) } -> ${ comp.inst } }
-            ).toSeq)
-          }
-        )
+        NamespaceDecl[q.type](nsDecl, nsInst)
       }
 
-      val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
-      val valDefs      = valuesValDef :: companions.map { (name, decl) =>
-        val method = cls.declaredField(name)
-        ValDef(method, Some(decl.inst.asTerm))
-      }.toList
-
-      val clsDef = ClassDef(cls, parents, body = valDefs)
-      val newCls = Apply(Select(New(TypeIdent(cls)), cls.primaryConstructor), Nil)
-      val nsInst = Block(List(clsDef), newCls).asExprOf[Namespace]
-
-      val nsDecl = cls =>
-        Symbol.newVal(
-          cls,
-          ns,
-          TypeRepr.of[Namespace],
-          Flags.EmptyFlags,
-          Symbol.noSymbol
-        )
-
-      ???
+      ns -> res
     }
   }
 
@@ -379,6 +391,7 @@ private[kentavro] object MacroUtils:
   def parseSchema(schema: Schema)(using Quotes): Expr[KSchema[?]] =
     import quotes.reflect.*
     val parsed       = parseAvroType(schema)
+    val nsDecl       = buildNamespacesDecl(parsed.members)
     val name: String = "Impl"
 
     parsed.typeArg.asType match
@@ -395,7 +408,7 @@ private[kentavro] object MacroUtils:
           Symbol.spliceOwner,
           name,
           parents = parents.map(_.tpe),
-          cls => kSchemaOverride(cls) ++ parsed.members.map(_.decl(cls)),
+          cls => kSchemaOverride(cls) ++ nsDecl.values.map(_.decl(cls)),
           selfType = None
         )
 
@@ -410,7 +423,7 @@ private[kentavro] object MacroUtils:
         val valuesExpr = '{
           Map.from(
             ${
-              Expr.ofSeq(parsed.members.map((key, inst) =>
+              Expr.ofSeq(nsDecl.map((key, inst) =>
                 val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
                 '{ ${ Expr(replaced) } -> ${ inst.inst } }
               ).toSeq)
@@ -419,7 +432,7 @@ private[kentavro] object MacroUtils:
         }
 
         val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
-        val valDefs      = tpeValDef :: valuesValDef :: parsed.members.map { (name, decl) =>
+        val valDefs      = tpeValDef :: valuesValDef :: nsDecl.map { (name, decl) =>
           val method = cls.declaredField(name)
           ValDef(method, Some(decl.inst.asTerm))
         }.toList

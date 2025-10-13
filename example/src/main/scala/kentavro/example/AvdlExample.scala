@@ -1,34 +1,16 @@
 package kentavro.example
 
-import kentavro.Avdl
+import kentavro.{Avdl, Named}
 import kentavro.example.BuildInfo
-import scala.annotation.experimental
 
-@experimental
 @main def run(): Unit =
-  val s =
+  val userSchema =
     Avdl
       .withImports(BuildInfo.rootDir + "/models")
       .fromFileIn("user.avdl")
 
-  val bytes = s.serialize(
-    s.`com.example.kentavro.User`(
-      "John",
-      1,
-      "@email",
-      42,
-      s.`com.example.kentavro.Address`("city", "768"),
-      s.`com.example.kentavro.Status`.SUSPENDED
-    )
+  val bytes = userSchema.serialize(
+    Named.make("John", 1, "john@example.com", 30, Named.make("123 Main St", "Anytown", "12345"))
   )
 
-  println(
-    s.deserialize(bytes).map { x =>
-      val st = s.`com.example.kentavro.Status`
-      x.value.status.value match
-        case st.ACTIVE.value    => "act"
-        case st.SUSPENDED.value => "sus"
-        case st.PENDING.value   => "pend"
-        case st.INACTIVE.value  => "sd"
-    }
-  )
+  println(userSchema.deserialize(bytes).map(_.value.id))
