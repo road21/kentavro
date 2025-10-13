@@ -432,16 +432,15 @@ private[kentavro] object MacroUtils:
         }
 
         val valuesVal  = cls.declaredField("values")
-        val valuesExpr = '{
-          Map.from(
-            ${
-              Expr.ofSeq(nsDecl.map((key, inst) =>
-                val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
-                '{ ${ Expr(replaced) } -> ${ inst.inst(valuesVal) } }
-              ).toSeq)
-            }
-          )
+        val rootValues = rootDecl.map { case (key, inst) =>
+          val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
+          '{ ${ Expr(replaced) } -> ${ inst.inst } }: Expr[(String, Any)]
         }
+        val declValues = nsDecl.map((key, inst) =>
+          val replaced = key.replace(".", "$u002E") // TODO: make it for all possibly escaped letters
+          '{ ${ Expr(replaced) } -> ${ inst.inst(valuesVal) } }: Expr[(String, Any)]
+        )
+        val valuesExpr   = '{ Map.from(${ Expr.ofSeq(rootValues ++ declValues) }) }
         val valuesValDef = ValDef(valuesVal, Some(valuesExpr.asTerm))
 
         val valDefs = tpeValDef :: valuesValDef :: nsDecl.map { (name, decl) =>
