@@ -29,8 +29,8 @@ import scala.collection.immutable.SeqMap
   *   - unions  -> union types
   */
 trait AvroType[T]:
-  type JType <: AnyRef
-  def isJType(value: AnyRef): Option[JType]
+  type JType
+  def isJType(value: Matchable): Option[JType]
   def JTypeDescription: String
 
   def schema: Schema
@@ -53,7 +53,7 @@ trait AvroType[T]:
 
 object AvroType:
   sealed trait Tag:
-    type JType <: AnyRef
+    type JType
     type SType
 
   object Tag:
@@ -94,7 +94,7 @@ object AvroType:
     case class TaggedJValue(t: Tag)(val v: t.JType)
     case class TaggedSValue(t: Tag)(val v: t.SType)
 
-    def fromJava(x: Any): Option[TaggedJValue] =
+    def fromJava(x: Matchable): Option[TaggedJValue] =
       // TODO: think about order
       x match
         case null                                           => Some(TaggedJValue(NullTag)(null))
@@ -111,7 +111,7 @@ object AvroType:
           Some(TaggedJValue(NamedTag(v.getSchema().getFullName()))(v))
         case _ => None
 
-    def fromScala(x: Any): Option[TaggedSValue] =
+    def fromScala(x: Matchable): Option[TaggedSValue] =
       x match
         case null           => Some(TaggedSValue(NullTag)(null))
         case v: Boolean     => Some(TaggedSValue(BooleanTag)(v))
@@ -128,13 +128,13 @@ object AvroType:
   trait NamedSchema[Name <: Singleton & String, T](using ValueOf[Name]) extends AvroType[Name ~ T]:
     final val name: Name = valueOf
 
-  trait Primitive[_JType <: AnyRef, SType](val tag: Tag)(using tag.JType =:= _JType, tag.SType =:= SType)
+  trait Primitive[_JType, SType](val tag: Tag)(using tag.JType =:= _JType, tag.SType =:= SType)
     extends AvroType[SType]:
     override type JType = _JType
 
     override val JTypeDescription: String = tag.toString
 
-    override def isJType(value: AnyRef): Option[JType] =
+    override def isJType(value: Matchable): Option[JType] =
       Tag.fromJava(value).collect {
         case t @ TaggedJValue(`tag`) => t.v.asInstanceOf[tag.JType]
       }
@@ -185,8 +185,8 @@ object AvroType:
       schema: Schema
   )(using ValueOf[Name]) extends NamedSchema[Name, T]:
     override type JType = GenericRecord
-    override val JTypeDescription: String              = s"GenericRecord(name = ${name})"
-    override def isJType(value: AnyRef): Option[JType] =
+    override val JTypeDescription: String                 = s"GenericRecord(name = ${name})"
+    override def isJType(value: Matchable): Option[JType] =
       value match
         case d: GenericRecord if (d.getSchema().getFullName() == name) => Some(d)
         case _                                                         => None
@@ -222,8 +222,8 @@ object AvroType:
       element: AvroType[T]
   ) extends AvroType[Vector[T]]:
     override type JType = java.util.Collection[?]
-    override val JTypeDescription: String              = "java.util.Collection[?]"
-    override def isJType(value: AnyRef): Option[JType] =
+    override val JTypeDescription: String                 = "java.util.Collection[?]"
+    override def isJType(value: Matchable): Option[JType] =
       value match
         case d: java.util.Collection[?] => Some(d)
         case _                          => None
@@ -245,8 +245,8 @@ object AvroType:
       value: AvroType[T]
   ) extends AvroType[Map[String, T]]:
     override type JType = java.util.Map[org.apache.avro.util.Utf8, ?]
-    override val JTypeDescription: String              = "java.util.Map[org.apache.avro.util.Utf8, ?]"
-    override def isJType(value: AnyRef): Option[JType] =
+    override val JTypeDescription: String                 = "java.util.Map[org.apache.avro.util.Utf8, ?]"
+    override def isJType(value: Matchable): Option[JType] =
       summon[ClassTag[java.util.Map[org.apache.avro.util.Utf8, ?]]].unapply(value)
 
     override def serializeToJType(data: Map[String, T]): java.util.Map[org.apache.avro.util.Utf8, ?] =
@@ -271,8 +271,8 @@ object AvroType:
       symbols: ListSet[String]
   )(using ValueOf[Name]) extends NamedSchema[Name, T]:
     override type JType = EnumSymbol
-    override val JTypeDescription: String              = s"EnumSymbol(name = ${name})"
-    override def isJType(value: AnyRef): Option[JType] =
+    override val JTypeDescription: String                 = s"EnumSymbol(name = ${name})"
+    override def isJType(value: Matchable): Option[JType] =
       value match
         case e: EnumSymbol if (e.getSchema().getFullName() == name) => Some(e)
         case _                                                      => None
@@ -289,8 +289,8 @@ object AvroType:
       size: Int
   )(using ValueOf[T], ValueOf[Name]) extends NamedSchema[Name, BytesN[T]]:
     override type JType = GenericFixed
-    override val JTypeDescription: String              = s"GenericFixed(name = ${name})"
-    override def isJType(value: AnyRef): Option[JType] =
+    override val JTypeDescription: String                 = s"GenericFixed(name = ${name})"
+    override def isJType(value: Matchable): Option[JType] =
       value match
         case d: GenericFixed if (d.getSchema().getFullName() == name) => Some(d)
         case _                                                        => None
@@ -322,18 +322,18 @@ object AvroType:
       override val schema: Schema,
       variants: SeqMap[Tag, AvroType[?]]
   ) extends AvroType[T]:
-    override type JType = AnyRef
+    override type JType = Matchable
 
     override val JTypeDescription: String = variants.map((k, _) => k).mkString("|")
 
-    override def isJType(value: AnyRef): Option[AnyRef] = Some(value)
+    override def isJType(value: Matchable): Option[Matchable] = Some(value)
 
-    override def serializeToJType(data: T): AnyRef =
+    override def serializeToJType(data: T): Matchable =
       Tag.fromScala(data).flatMap { tv =>
         variants.get(tv.t).map { case (s: AvroType[typ]) => s.serializeToJType(data.asInstanceOf[typ]) }
       }.getOrElse(throw new Exception("shouldn't be thrown"))
 
-    override def deserializeFromJType(obj: AnyRef): Either[String, T] =
+    override def deserializeFromJType(obj: Matchable): Either[String, T] =
       Tag.fromJava(obj)
         .toRight(s"Unable to get tag for $obj: ${obj.getClass()}").flatMap { tv =>
           variants.get(tv.t)
@@ -343,8 +343,8 @@ object AvroType:
             }
         }
 
-  private def serializeUnsafe(obj: AnyRef, schema: Schema): Array[Byte] = {
-    val writer  = new GenericDatumWriter[AnyRef](schema)
+  private def serializeUnsafe(obj: Any, schema: Schema): Array[Byte] = {
+    val writer  = new GenericDatumWriter[Any](schema)
     val out     = new ByteArrayOutputStream()
     val encoder = EncoderFactory.get().binaryEncoder(out, null)
     writer.write(obj, encoder)
@@ -355,8 +355,8 @@ object AvroType:
   private def deserializeUnsafe(
       bytes: Array[Byte],
       schema: Schema
-  ): Either[String, AnyRef] = Try {
-    val reader  = new GenericDatumReader[AnyRef](schema)
+  ): Either[String, Any] = Try {
+    val reader  = new GenericDatumReader[Any](schema)
     val in      = new ByteArrayInputStream(bytes)
     val decoder = DecoderFactory.get().binaryDecoder(in, null)
     reader.read(null, decoder)

@@ -12,7 +12,7 @@ enum Status {
 record User {
     string name;
     int id;
-    string email;
+    union {string, null} email;
     int age = 0;
     com.example.kentavro.Address address;
     Status status;
