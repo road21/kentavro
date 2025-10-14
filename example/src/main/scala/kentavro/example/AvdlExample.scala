@@ -16,7 +16,7 @@ import scala.annotation.experimental
     s.User(
       "John",
       1,
-      "@email",
+      null,
       42,
       ns.Address("city", "768"),
       s.Status.SUSPENDED

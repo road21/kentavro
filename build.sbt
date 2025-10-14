@@ -6,7 +6,7 @@ lazy val core = (project in file("modules/core"))
   .settings(
     scalacOptions ++= Seq(
       "-Xcheck-macros",
-      "-deprecation"
+      "-deprecation",
     ),
     name := "kentavro-core",
     libraryDependencies ++= List(
@@ -33,7 +33,10 @@ lazy val example = (project in file("example"))
     buildInfoKeys ++= Seq[BuildInfoKey](
       "rootDir" -> baseDirectory.value.toString
     ),
-    buildInfoPackage := "kentavro.example"
+    buildInfoPackage := "kentavro.example",
+    scalacOptions ++= Seq(
+      "-Yexplicit-nulls"
+    ),
   )
   .dependsOn(idl)
 
