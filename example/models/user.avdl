@@ -1,19 +1,8 @@
+namespace example.fscala;
 schema User;
-
-import idl "address.avdl";
-
-enum Status {
-    ACTIVE,
-    INACTIVE,
-    PENDING,
-    SUSPENDED
-}
-
+import idl "status.avdl";
 record User {
-    string name;
-    int id;
-    union {string, null} email;
-    int age = 0;
-    com.example.kentavro.Address address;
-    Status status;
+  string name;
+  int age;
+  union { Active, Inactive } status;
 }

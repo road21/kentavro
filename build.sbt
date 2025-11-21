@@ -1,5 +1,9 @@
-ThisBuild / version := "0.1.0-SNAPSHOT"
+inThisBuild(List(
+  organization := "io.github.road21",
+  homepage     := Some(url("https://github.com/road21/kentavro"))
+))
 
+ThisBuild / version      := "0.1.0-RC1"
 ThisBuild / scalaVersion := "3.7.2"
 
 lazy val core = (project in file("modules/core"))

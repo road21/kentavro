@@ -1,8 +1,0 @@
-namespace com.example.kentavro;
-
-schema Address;
-
-record Address {
-    string city;
-    string zipCode;
-}
